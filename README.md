@@ -35,6 +35,18 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b6a", ATTRS{idProduct}=="2b31", MODE="06
 
 then `sudo udevadm control --reload-rules && sudo udevadm trigger` and re-plug the board.
 
+## Board power-up sequence
+
+Do this every time before connecting the board. If you skip it, the USB link still works but the ADC side of the
+isolator stays unpowered.
+
+1. With USB unplugged, set the jumpers:
+   - [ ] **JP12 (VDUT source) → VADJ** (the 3.3 V regulator)
+   - [ ] **JP13 (5V Enable) → shorted**
+   - [ ] **JP1, JP2, JP3 → shorted** (VDUT to AVDD, VDDREG and VDDIO)
+2. Plug in USB.
+3. Run `max11410-evkit info`. It should show firmware 1.1, MAX11410EVK, echo ok and **PART_ID 0x000F02**.
+
 ## Smoke test (Phase 1 gate)
 
 ```sh
@@ -104,3 +116,9 @@ window, so no display is needed.
   the flag is a write of zeros to the register.
 * Commands `0x45`/`0x46` never reply and are not exposed.
 * Board SRAM is assumed to be 32 KB (`EVKIT_SRAM_BYTES`) until the BOM confirms the part.
+
+## Troubleshooting
+
+**`info` works but every register reads 0xFF (PART_ID 0xFFFFFF).** The ADC side isn't powered. Redo the
+power-up sequence above, then unplug and replug USB.
+
