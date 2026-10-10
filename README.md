@@ -8,6 +8,8 @@ is a vendor HID device (VID `0x0B6A`, PID `0x2B31`, "MAXQ622HID").
 src/max11410_evkit/
   transport/   64-byte HID reports: HidTransport (hidapi), FakeEvKitTransport (emulated board)
   board/       EVKIT firmware command protocol: EvKitBoard (typed method per command)
+  device/      MAX11410: regmap.yaml + RegisterMap (named registers/fields, shadow cache),
+               MAX11410 (init, channels, conversions, self-calibration, volts)
   cli.py       max11410-evkit smoke-test CLI
   gui/         desktop app (PySide6 + pyqtgraph)
 ```
@@ -47,6 +49,11 @@ isolator stays unpowered.
 2. Plug in USB.
 3. Run `max11410-evkit info`. It should show firmware 1.1, MAX11410EVK, echo ok and **PART_ID 0x000F02**.
 
+## Troubleshooting
+
+**`info` works but every register reads 0xFF (PART_ID 0xFFFFFF).** The ADC side isn't powered. Redo the
+power-up sequence above, then unplug and replug USB.
+
 ## Smoke test (Phase 1 gate)
 
 ```sh
@@ -61,7 +68,46 @@ max11410-evkit --fake info       # same against the emulated board
 Register addresses and values are hex. Registers 0x00–0x10 are 8-bit, 0x11–0x39 24-bit; for
 0x3A–0x6F give the width explicitly (`peek 3A 2`).
 
-## Library use
+## Register map and conversions (Phase 2)
+
+```sh
+max11410-evkit regs                  # 0x00-0x39 with field decode; --all adds the sequencer
+max11410-evkit get CTRL.REFSEL       # -> 1 (REF1)
+max11410-evkit set FILTER.LINEF SINC4
+max11410-evkit set FILTER.RATE 4     # numbers: decimal, or 0x.. for hex
+max11410-evkit selfcal               # self + PGA calibration, FILTER/PGA restored
+max11410-evkit read --ch 0 -n 5      # EVKIT default: AIN2 vs GND, REF1 2.5 V, SINC4 60 sps
+max11410-evkit read -n 5 --ainp 3 --gain 8 --bipolar --method poll
+```
+
+The register map lives in `src/max11410_evkit/device/regmap.yaml`. Each register has its
+address, width, access, reset value and fields (bits, enum values). Anything not yet checked
+against the datasheet is marked `confirmed: false` and "TODO(datasheet)". Sources: the Linux
+`max11410` IIO driver, and values measured on the EVKIT (PD reset 0x01, CTRL reset 0x01,
+PART_ID 0x000F02). The sequencer registers 0x3A–0x6F are assumed to be 16-bit (unconfirmed).
+
+```python
+from max11410_evkit import connect
+from max11410_evkit.device import MAX11410, ChannelConfig
+
+with connect() as board:
+    adc = MAX11410(board)
+    adc.init()  # PART_ID check, PD=0, CTRL.FORMAT=1
+    adc.regs.FILTER.LINEF = "SINC4"  # read-modify-write via the shadow cache
+    print(adc.regs.CTRL.REFSEL)  # 1(REF1)
+    adc.self_calibrate()
+    adc.set_channel(
+        1, ChannelConfig(name="bridge", ainp=0, ainn=1, bipolar=True, path="pga", gain=64)
+    )
+    print(adc.read_single(1).volts)
+    snap = adc.regs.read_all()
+    print(adc.regs.dump(snap))
+```
+
+Conversions use offset binary (FORMAT = 1): bipolar `V = (raw − 2^23)·2·Vref/(2^24·G)`,
+unipolar `V = raw·Vref/(2^24·G)`.
+
+## Library use (board level)
 
 ```python
 from max11410_evkit import connect
@@ -89,20 +135,6 @@ ruff check . && ruff format --check .
 The tests run against `FakeEvKitTransport`, an emulation of the board firmware (`main.c`) plus
 a toy MAX11410 register model.
 
-## GUI screenshots
-
-The tab screenshots in `docs/gui/screenshots/` are generated, not committed (`screenshots/` is in
-`.gitignore`). To regenerate them:
-
-```sh
-pip install -e ".[gui]"          # PySide6, pyqtgraph, numpy
-QT_QPA_PLATFORM=offscreen PYTHONPATH=src python docs/gui/render_screenshots.py --theme both
-```
-
-`--theme` is `light`, `dark` or `both`. Light shots go to `docs/gui/screenshots/<tab>.png`, dark
-to `docs/gui/screenshots/dark/<tab>.png`. `QT_QPA_PLATFORM=offscreen` renders without opening a
-window, so no display is needed.
-
 ## Protocol notes
 
 * Host → board: `[N][cmd][args…]` in a 64-byte report (hidapi: `0x00` report ID + 64 bytes).
@@ -116,9 +148,3 @@ window, so no display is needed.
   the flag is a write of zeros to the register.
 * Commands `0x45`/`0x46` never reply and are not exposed.
 * Board SRAM is assumed to be 32 KB (`EVKIT_SRAM_BYTES`) until the BOM confirms the part.
-
-## Troubleshooting
-
-**`info` works but every register reads 0xFF (PART_ID 0xFFFFFF).** The ADC side isn't powered. Redo the
-power-up sequence above, then unplug and replug USB.
-

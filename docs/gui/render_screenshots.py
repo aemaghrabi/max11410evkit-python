@@ -36,18 +36,24 @@ def pump(app: QApplication, n: int = 5) -> None:
 
 def populate(win) -> None:
     """Drive the mock backend so every tab shows representative data."""
-    win.adc_tab.convert_btn.click()
+    win.adc_tab.convert_all_btn.click()
+    win.adc_tab.set_active_channel(1)  # show a PGA bridge channel in the editor
     win.other_tab.read_all_btn.click()
     win.other_tab.set_wait(100, 2)
     win.other_tab.waitCalcRequested.emit(100, 2)
     win.sequence_tab.read_all.click()
     win.sequence_tab.currentAddressRequested.emit()
     win.registers_tab.read_all.click()
+    win.scope_tab.set_selected_channels([1, 3])
+    win.scope_tab.bar.samples.setCurrentIndex(1)  # 512
     win.scope_tab.bar.capture.click()
+    win.dmm_tab.set_selected_channels([0, 1, 2, 3])
     for _ in range(140):
-        win.dmm_tab.measureRequested.emit()
+        win.dmm_tab.measureRequested.emit(win.dmm_tab.selected())
+    win.histogram_tab.set_selected_channel(1)
     win.histogram_tab.bar.samples.setCurrentIndex(4)  # 4096
     win.histogram_tab.bar.capture.click()
+    win.fft_tab.set_selected_channel(0)
     win.fft_tab.bar.samples.setCurrentIndex(4)
     win.fft_tab.bar.capture.click()
 

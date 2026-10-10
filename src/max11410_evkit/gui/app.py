@@ -25,9 +25,7 @@ def build_window(theme: str = "system", mock: bool = True) -> tuple[MainWindow, 
         win.set_connected(True, "MOCK")
         win.log("MAX11410 EV Kit software started (mock backend — no hardware)", "info")
         win.log("EV kit hardware connected (simulated)", "ok")
-        win.log(
-            "Defaults: 60Hz SINC4, 59.8 sps, AINP=AIN2, AINN=GND, Channel 0, Continuous", "info"
-        )
+        win.log("Demo channel set loaded: 4 channels enabled (Ch 0 = AIN2–GND, 60Hz SINC4)", "info")
     return win, backend
 
 

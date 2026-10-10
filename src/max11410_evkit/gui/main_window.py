@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .channels import ChannelStore
 from .status_log import StatusLog
 from .tabs import (
     AdcConfigTab,
@@ -46,14 +47,16 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_TITLE)
         self._config_path: str | None = None
 
-        self.adc_tab = AdcConfigTab()
-        self.other_tab = OtherTab()
+        # One shared host-side channel model (8 channel configs + active channel).
+        self.channels = ChannelStore(self)
+        self.adc_tab = AdcConfigTab(self.channels)
+        self.other_tab = OtherTab(self.channels)
         self.sequence_tab = SequenceTab()
         self.registers_tab = RegistersTab()
-        self.scope_tab = ScopeTab()
-        self.dmm_tab = DmmTab()
-        self.histogram_tab = HistogramTab()
-        self.fft_tab = FftTab()
+        self.scope_tab = ScopeTab(self.channels)
+        self.dmm_tab = DmmTab(self.channels)
+        self.histogram_tab = HistogramTab(self.channels)
+        self.fft_tab = FftTab(self.channels)
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(False)
@@ -67,7 +70,7 @@ class MainWindow(QMainWindow):
         split.addWidget(self.status_log)
         split.setStretchFactor(0, 1)
         split.setStretchFactor(1, 0)
-        split.setSizes([600, 200])
+        split.setSizes([640, 150])
         central = QWidget()
         lay = QHBoxLayout(central)
         lay.setContentsMargins(8, 8, 8, 4)

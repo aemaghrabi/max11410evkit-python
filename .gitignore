@@ -68,3 +68,7 @@ Desktop.ini
 # --- Secrets / local env ---
 .env
 .env.*
+
+# Local working notes (commit later)
+docs/plan/
+docs/history/

@@ -7,7 +7,15 @@ from collections.abc import Callable, Iterable, Sequence
 
 import pyqtgraph as pg
 from PySide6.QtCore import QRegularExpression, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QRegularExpressionValidator
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QPainter,
+    QPixmap,
+    QRegularExpressionValidator,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -22,8 +30,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .placeholder_regmap import CAPTURE_RATES, SAMPLE_COUNTS
-from .theme import ThemeManager, mono_font
+from .channels import channel_name
+from .placeholder_regmap import SAMPLE_COUNTS
+from .theme import ThemeManager, channel_color, mono_font
 
 # ------------------------------------------------------------------ formatting
 _SI = [(1e0, ""), (1e-3, "m"), (1e-6, "µ"), (1e-9, "n")]
@@ -126,6 +135,7 @@ class StatsPanel(QGroupBox):
         title: str,
         rows: Sequence[tuple[str, str, Callable[[object], str]]],
         parent: QWidget | None = None,
+        header: QWidget | None = None,
     ) -> None:
         super().__init__(title, parent)
         self._fmt: dict[str, Callable[[object], str]] = {}
@@ -133,7 +143,11 @@ class StatsPanel(QGroupBox):
         grid = QGridLayout(self)
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(8)
-        for r, (key, label, fmt) in enumerate(rows):
+        off = 0
+        if header is not None:
+            grid.addWidget(header, 0, 0, 1, 2)
+            off = 1
+        for r, (key, label, fmt) in enumerate(rows, start=off):
             name = muted(label)
             val = QLabel("—")
             val.setProperty("role", "value")
@@ -144,7 +158,7 @@ class StatsPanel(QGroupBox):
             grid.addWidget(val, r, 1)
             self._fmt[key] = fmt
             self._labels[key] = val
-        grid.setRowStretch(len(rows), 1)
+        grid.setRowStretch(len(rows) + off, 1)
         grid.setColumnStretch(1, 1)
         self.setMinimumWidth(250)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
@@ -158,11 +172,112 @@ class StatsPanel(QGroupBox):
             lbl.setText("—")
 
 
+# ------------------------------------------------------------------ channel chips
+def dot_icon(color: str, d: int = 10) -> QIcon:
+    pm = QPixmap(d + 2, d + 2)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    p.drawEllipse(1, 1, d, d)
+    p.end()
+    return QIcon(pm)
+
+
+class ChannelChips(QWidget):
+    """Row of toggle chips, one per *enabled* channel (colour dot + '0 · name').
+
+    ``multi=True``: any number may be checked (Scope, DMM). ``multi=False``:
+    exactly one (Histogram, FFT). Emits ``selectionChanged(list[int])``.
+    """
+
+    selectionChanged = Signal(list)
+
+    def __init__(self, store, multi: bool = True, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._store = store
+        self._multi = multi
+        self._buttons: dict[int, QPushButton] = {}
+        self._selected: list[int] = [store.active] if store.active in store.enabled() else []
+        self._lay = QHBoxLayout(self)
+        self._lay.setContentsMargins(0, 0, 0, 0)
+        self._lay.setSpacing(4)
+        store.changed.connect(lambda _ch: self._rebuild())
+        ThemeManager.instance().changed.connect(self._rebuild)
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        while self._lay.count():
+            it = self._lay.takeAt(0)
+            if it.widget():
+                it.widget().hide()
+                it.widget().deleteLater()
+        self._buttons.clear()
+        enabled = self._store.enabled()
+        sel = [ch for ch in self._selected if ch in enabled]
+        if not sel and enabled:
+            sel = [enabled[0]]
+        if not self._multi:
+            sel = sel[:1]
+        for ch in enabled:
+            cfg = self._store.get(ch)
+            name = channel_name(ch, cfg)
+            short = name if len(name) <= 22 else name[:21] + "…"
+            b = QPushButton(f"{ch} · {short}")
+            b.setProperty("chip", True)
+            b.setCheckable(True)
+            b.setChecked(ch in sel)
+            b.setIcon(dot_icon(channel_color(ch)))
+            b.setToolTip(f"Channel {ch}: {name}")
+            b.setCursor(Qt.PointingHandCursor)
+            bold = b.font()
+            bold.setWeight(QFont.DemiBold)
+            b.setMinimumWidth(QFontMetrics(bold).horizontalAdvance(b.text()) + 44)
+            b.clicked.connect(lambda _c=False, c=ch: self._on_click(c))
+            self._lay.addWidget(b)
+            self._buttons[ch] = b
+        if not enabled:
+            self._lay.addWidget(muted("No channels enabled"))
+        changed = sel != self._selected
+        self._selected = sel
+        if changed:
+            self.selectionChanged.emit(list(sel))
+
+    def _on_click(self, ch: int) -> None:
+        if self._multi:
+            checked = [c for c, b in self._buttons.items() if b.isChecked()]
+            # keep the existing order (first = primary), append newly checked chips
+            sel = [c for c in self._selected if c in checked]
+            sel += [c for c in checked if c not in sel]
+            if not sel:  # keep at least one
+                self._buttons[ch].setChecked(True)
+                sel = [ch]
+        else:
+            sel = [ch]
+            for c, b in self._buttons.items():
+                b.setChecked(c == ch)
+        self._selected = sel
+        self.selectionChanged.emit(list(sel))
+
+    def selected(self) -> list[int]:
+        return list(self._selected)
+
+    def set_selected(self, chans: list[int]) -> None:
+        self._selected = list(chans if self._multi else chans[:1])
+        for c, b in self._buttons.items():
+            b.setChecked(c in self._selected)
+
+
 # ------------------------------------------------------------------ capture bar
 class CaptureBar(QWidget):
-    """Sample-rate + sample-count + Capture button, used by Scope/Histogram/FFT."""
+    """[leading widgets] · Samples · rate info · Capture.  Used by Scope/Histogram/FFT.
 
-    captureClicked = Signal(float, int)
+    The data rate is part of each channel's configuration (ADC Config tab), so the bar
+    only *shows* it; ``set_rate_text`` is called by the tab when the selection changes.
+    """
+
+    captureClicked = Signal(int)  # n_samples
 
     def __init__(self, leading: Iterable[QWidget] = (), parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -171,11 +286,9 @@ class CaptureBar(QWidget):
         lay.setSpacing(8)
         for w in leading:
             lay.addWidget(w)
-        self.rate = QComboBox()
-        self.rate.setToolTip("Continuous-mode output data rate used for the capture (SINC4).")
-        for r in CAPTURE_RATES:
-            self.rate.addItem(f"{r:g} sps", r)
-        self.rate.setCurrentIndex(CAPTURE_RATES.index(59.8))
+        lay.addStretch(1)
+        self.rate_info = muted("")
+        self.rate_info.setToolTip("Output data rate comes from the channel configuration.")
         self.samples = QComboBox()
         self.samples.setToolTip(
             "Number of samples to capture into the board SRAM (max 8192 with 32 KB)."
@@ -184,18 +297,17 @@ class CaptureBar(QWidget):
             self.samples.addItem(str(n), n)
         self.samples.setCurrentIndex(SAMPLE_COUNTS.index(1024))
         self.capture = primary_button("Capture", "Acquire a block of samples from the EV kit.")
-        lay.addWidget(muted("Sample rate"))
-        lay.addWidget(self.rate)
+        lay.addWidget(self.rate_info)
         lay.addSpacing(6)
         lay.addWidget(muted("Samples"))
         lay.addWidget(self.samples)
-        lay.addStretch(1)
         lay.addWidget(self.capture)
         self.capture.clicked.connect(
-            lambda: self.captureClicked.emit(
-                float(self.rate.currentData()), int(self.samples.currentData())
-            )
+            lambda: self.captureClicked.emit(int(self.samples.currentData()))
         )
+
+    def set_rate_text(self, text: str) -> None:
+        self.rate_info.setText(text)
 
     def set_busy(self, busy: bool) -> None:
         self.capture.setEnabled(not busy)
@@ -250,6 +362,10 @@ class ThemedPlot(pg.PlotWidget):
             axis.setTextPen(pg.mkPen(c.plot_fg))
         self.showGrid(x=True, y=True, alpha=c.grid_alpha)
         self.set_axis_labels(*self._labels)
+
+
+def channel_pen(ch: int, width: float = 1.4) -> object:
+    return pg.mkPen(channel_color(ch), width=width)
 
 
 def trace_pen(width: float = 1.4, which: int = 1) -> object:

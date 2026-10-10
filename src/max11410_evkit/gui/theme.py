@@ -42,6 +42,7 @@ class ThemeColors:
     ok: str
     warn: str
     bad: str
+    channel_colors: tuple[str, ...] = ()
 
 
 LIGHT = ThemeColors(
@@ -64,6 +65,16 @@ LIGHT = ThemeColors(
     ok="#12b76a",
     warn="#f79009",
     bad="#d92d20",
+    channel_colors=(
+        "#1f6feb",
+        "#e8590c",
+        "#12a150",
+        "#8e44ec",
+        "#d92d20",
+        "#0b98b0",
+        "#c11574",
+        "#a16207",
+    ),  # fmt: skip
 )
 
 DARK = ThemeColors(
@@ -86,6 +97,16 @@ DARK = ThemeColors(
     ok="#32d583",
     warn="#fdb022",
     bad="#f97066",
+    channel_colors=(
+        "#5ab0ff",
+        "#ff9f43",
+        "#3ddc84",
+        "#b58cff",
+        "#ff6b6b",
+        "#3fd0e0",
+        "#f472b6",
+        "#e5b84b",
+    ),  # fmt: skip
 )
 
 
@@ -165,9 +186,36 @@ def _stylesheet(c: ThemeColors) -> str:
         border-bottom: 1px solid {c.border}; background: {c.button}; font-weight: 600; }}
     QPlainTextEdit#statusLog {{ font-family: "{mono_family()}"; background: {c.base}; }}
     QStatusBar QLabel {{ padding: 0 6px; }}
+    QPushButton[chip="true"] {{
+        border: 1px solid {c.border}; border-radius: 11px; padding: 2px 10px 2px 6px;
+        background: {c.base}; color: {c.muted}; min-height: 18px; font-weight: 600;
+    }}
+    QPushButton[chip="true"]:checked {{
+        border: 1px solid {c.accent}; color: {c.text};
+        background: {_tint(c.accent, c.base, 0.16)};
+    }}
+    QLabel[role="caption"] {{ color: {c.muted}; font-size: 10px; font-weight: 600;
+        letter-spacing: 1px; }}
+    QLabel[role="badge"] {{ color: {c.accent_text}; background: {c.accent}; border-radius: 4px;
+        padding: 1px 6px; font-size: 10px; font-weight: 700; }}
+    QLabel[role="badge-global"] {{ color: {c.text}; background: {c.border}; border-radius: 4px;
+        padding: 1px 6px; font-size: 10px; font-weight: 700; }}
     QFrame#readoutFrame {{ background: {c.base}; border: 1px solid {c.border};
         border-radius: 8px; }}
     """
+
+
+def _tint(fg: str, bg: str, amount: float) -> str:
+    a, b = QColor(fg), QColor(bg)
+    mix = [round(b.red() + (a.red() - b.red()) * amount),
+           round(b.green() + (a.green() - b.green()) * amount),
+           round(b.blue() + (a.blue() - b.blue()) * amount)]  # fmt: skip
+    return QColor(*mix).name()
+
+
+def channel_color(ch: int) -> str:
+    cols = ThemeManager.instance().colors.channel_colors
+    return cols[ch % len(cols)]
 
 
 def mono_family() -> str:

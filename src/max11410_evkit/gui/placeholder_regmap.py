@@ -198,21 +198,48 @@ RATES: dict[str, list[float]] = {
 }
 CAPTURE_RATES = RATES["SINC4"]
 
-STARTUP_DEFAULTS = {
-    "filter": "SINC4",
-    "rate": 59.8,
+NUM_CHANNELS = 8  # host-side channels 0..7 <-> DATA0..7, LTHRESH/UTHRESH0..7, sequencer
+
+# Per-channel configuration (host-side concept; applied to the global MUX/CTRL/PGA/FILTER
+# registers by the backend before each conversion of that channel).
+CHANNEL_KEYS = (
+    "name", "enabled", "ainp", "ainn", "sig_path", "pga_gain", "refsel", "vrefp_buf",
+    "vrefn_buf", "vref", "unipolar", "format", "filter", "rate", "settling_ms",
+)  # fmt: skip
+CHANNEL_DEFAULTS = {
+    "name": "",  # "" -> displayed as "Channel n"
+    "enabled": False,
     "ainp": "AIN2",
     "ainn": "GND",
-    "channel": 0,
-    "conv_mode": "Continuous",
     "sig_path": "Buffered",
     "pga_gain": 1,
-    "unipolar": False,
-    "format": "Two's complement",
     "refsel": "REF0P / REF0N",  # PLACEHOLDER: confirm EV kit power-on reference
     "vrefp_buf": False,
     "vrefn_buf": False,
     "vref": 2.5,
-    "power": "Normal",
+    "unipolar": False,
+    "format": "Two's complement",
+    "filter": "SINC4",
+    "rate": 59.8,
+    "settling_ms": 0.0,
 }
+
+# Device-wide (global) settings.
+DEVICE_KEYS = (
+    "conv_mode", "power", "idac_current_ua", "idac0_pin", "idac1_pin", "vbias_mode",
+    "vbias_pins", "burnout",
+)  # fmt: skip
+DEVICE_DEFAULTS = {
+    "conv_mode": "Continuous",
+    "power": "Normal",
+    "idac_current_ua": None,
+    "idac0_pin": "AIN0",
+    "idac1_pin": "AIN0",
+    "vbias_mode": "Off",
+    "vbias_pins": [],
+    "burnout": "Off",
+}
+
+# EV kit software start-up state: channel 0 enabled (AIN2-GND, 60Hz SINC4 59.8 sps), Continuous.
+STARTUP_DEFAULTS = {**CHANNEL_DEFAULTS, **DEVICE_DEFAULTS, "enabled": True, "channel": 0}
 CLOCK_HZ = 2.4576e6

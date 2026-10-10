@@ -1,0 +1,2714 @@
+# MAX11410 register map - transcribed from the MAX11410 datasheet (rev 3, 10/19),
+# "Register Map" section pp. 38-90, plus reset values measured on the MAX11410EVKIT.
+#
+# Register keys:
+#   name, addr, width (bytes), access (rw | r), reset (int or null)
+#   reset_source:    datasheet | hardware | datasheet+hardware  (where the reset value comes from)
+#   measured_reset:  value read on the EVKIT when it differs from the datasheet reset
+#   confirmed:       name/address/width/fields checked against the datasheet
+#   reset_confirmed: reset value stated by the datasheet or measured on hardware
+#   volatile:        hardware changes it, or reading has side effects -> never served from cache
+#   trigger:         writing starts an action -> skipped by write_all
+#   page, description, notes
+# Field keys: name, bits ("7:4" or "3"), access (rw | r | rc = read, clears on STATUS read),
+#   values (enum name -> int), aliases (older/driver names accepted on lookup), description.
+# Fields are listed MSB first, as in the datasheet.
+#
+# SPI address byte: bit 7 = R/WB (1 = read, 0 = write), bits 6:0 = REG_ADDR (datasheet p.38).
+# Widths: 0x00-0x10 8-bit, 0x11-0x39 24-bit, 0x3A-0x6F 16-bit (sequencer).
+# Datasheet names use the micro sign (uC0..uC52, uCADDR); this file spells them UC0..UC52, UCADDR.
+version: 2
+registers:
+
+  - name: PD
+    addr: 0x00
+    width: 1
+    access: rw
+    reset: 0x02
+    reset_source: datasheet
+    measured_reset: 0x01
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.40"
+    description: "Power-down state. During wakeup PD reads 0b10, then 0b00 when the wakeup timer expires."
+    notes: "EVKIT reads 0x01 (standby) after power-up, not the datasheet POR value 0x2 (sleep); a PD=RESET (0b11) self-clears to 0b01, which would explain it."
+    fields:
+      - name: PD
+        bits: "1:0"
+        access: rw
+        confirmed: true
+        description: "Power mode."
+        values:
+          "NORMAL": 0
+          "STANDBY": 1
+          "SLEEP": 2
+          "RESET": 3
+  - name: CONV_START
+    addr: 0x01
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    trigger: true
+    source: "datasheet rev3 p.40"
+    description: "Writing starts a conversion of type CONV_TYPE stored in DATA[DEST]. Writing it while in standby/sleep wakes the part (PD -> normal) first."
+    fields:
+      - name: DEST
+        bits: "6:4"
+        access: rw
+        confirmed: true
+        description: "Destination data register."
+        values:
+          "DATA0": 0
+          "DATA1": 1
+          "DATA2": 2
+          "DATA3": 3
+          "DATA4": 4
+          "DATA5": 5
+          "DATA6": 6
+          "DATA7": 7
+      - name: CONV_TYPE
+        bits: "1:0"
+        access: rw
+        confirmed: true
+        description: "Conversion type (0b10 and 0b11 are both 1:4 duty-cycled, modulator low-power mode)."
+        values:
+          "SINGLE": 0
+          "CONTINUOUS": 1
+          "DUTY_CYCLE": 2
+          "DUTY_CYCLE_ALT": 3
+  - name: SEQ_START
+    addr: 0x02
+    width: 1
+    access: rw
+    reset: 0x3A
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    trigger: true
+    source: "datasheet rev3 p.41"
+    description: "Writing starts the sequencer at SEQ_ADDR (0x3A-0x6E; other addresses are ignored). Inside a sequence it acts as GOTO. Writing it while in standby/sleep wakes the part (PD -> normal) first."
+    fields:
+      - name: SEQ_ADDR
+        bits: "6:0"
+        access: rw
+        confirmed: true
+        description: "Sequencer start address."
+  - name: CAL_START
+    addr: 0x03
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    trigger: true
+    source: "datasheet rev3 p.41"
+    description: "Writing runs the calibration selected by CAL_TYPE at the current LINEF/RATE; completion sets STATUS.CAL_RDY. Writing it while in standby/sleep wakes the part (PD -> normal) first."
+    fields:
+      - name: CAL_TYPE
+        bits: "2:0"
+        access: rw
+        confirmed: true
+        description: "SELF -> SELF_OFF + SELF_GAIN_1; PGA -> SELF_GAIN_<gain> (no-op at gain 1 or without the PGA path); SYS_* -> system offset/gain registers A or B. 2,3 reserved."
+        values:
+          "SELF": 0
+          "PGA": 1
+          "SYS_OFF_A": 4
+          "SYS_GAIN_A": 5
+          "SYS_OFF_B": 6
+          "SYS_GAIN_B": 7
+  - name: GP0_CTRL
+    addr: 0x04
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.42"
+    description: "GPIO0 configuration. 0xC1 = CMOS output driving INTRB (active-low data-ready interrupt). EXTCLK=1 overrides GP0_CTRL."
+    fields:
+      - name: GP0_DIR
+        bits: "7:6"
+        access: rw
+        confirmed: true
+        description: "Direction. 1 is reserved."
+        values:
+          "INPUT": 0
+          "OPEN_DRAIN": 2
+          "CMOS": 3
+      - name: GP0_ISEL
+        bits: "5:4"
+        access: rw
+        confirmed: true
+        description: "Input function (rising edge). 3 is reserved."
+        values:
+          "DISABLED": 0
+          "CONV_START": 1
+          "SEQ_START": 2
+      - name: GP0_OSEL
+        bits: "2:0"
+        access: rw
+        confirmed: true
+        description: "Output function."
+        values:
+          "DISABLED": 0
+          "INTRB": 1
+          "INTR": 2
+          "LOGIC0": 3
+          "LOGIC1": 4
+          "LOW_SIDE_SWITCH": 5
+          "MOD_ACTIVE": 6
+          "SYSCLK": 7
+  - name: GP1_CTRL
+    addr: 0x05
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.43"
+    description: "GPIO1 configuration. 0xC1 = CMOS output driving INTRB (active-low data-ready interrupt)."
+    fields:
+      - name: GP1_DIR
+        bits: "7:6"
+        access: rw
+        confirmed: true
+        description: "Direction. 1 is reserved."
+        values:
+          "INPUT": 0
+          "OPEN_DRAIN": 2
+          "CMOS": 3
+      - name: GP1_ISEL
+        bits: "5:4"
+        access: rw
+        confirmed: true
+        description: "Input function (rising edge). 3 is reserved."
+        values:
+          "DISABLED": 0
+          "CONV_START": 1
+          "SEQ_START": 2
+      - name: GP1_OSEL
+        bits: "2:0"
+        access: rw
+        confirmed: true
+        description: "Output function."
+        values:
+          "DISABLED": 0
+          "INTRB": 1
+          "INTR": 2
+          "LOGIC0": 3
+          "LOGIC1": 4
+          "LOW_SIDE_SWITCH": 5
+          "MOD_ACTIVE": 6
+          "SYSCLK": 7
+  - name: GP_CONV
+    addr: 0x06
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.44"
+    description: "Conversion type and destination used when a GPIO starts a conversion (writing does not start one)."
+    fields:
+      - name: GP_DEST
+        bits: "6:4"
+        access: rw
+        confirmed: true
+        description: "Destination data register."
+        values:
+          "DATA0": 0
+          "DATA1": 1
+          "DATA2": 2
+          "DATA3": 3
+          "DATA4": 4
+          "DATA5": 5
+          "DATA6": 6
+          "DATA7": 7
+      - name: GP_CONV_TYPE
+        bits: "1:0"
+        access: rw
+        confirmed: true
+        description: "Conversion type."
+        values:
+          "SINGLE": 0
+          "CONTINUOUS": 1
+          "DUTY_CYCLE": 2
+          "DUTY_CYCLE_ALT": 3
+  - name: GP_SEQ_ADDR
+    addr: 0x07
+    width: 1
+    access: rw
+    reset: 0x3A
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.44"
+    description: "Sequencer address used when a GPIO starts a sequence (valid 0x3A-0x6F)."
+    fields:
+      - name: GP_SEQ_ADDR
+        bits: "6:0"
+        access: rw
+        confirmed: true
+        description: "Sequencer address."
+  - name: FILTER
+    addr: 0x08
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.45"
+    description: "Digital filter type and data-rate index (Tables 9a-9d)."
+    fields:
+      - name: RESERVED
+        bits: "6"
+        access: rw
+        confirmed: true
+        description: "Reserved; always write 0."
+      - name: LINEF
+        bits: "5:4"
+        access: rw
+        confirmed: true
+        description: "Filter type."
+        values:
+          "FIR5060": 0
+          "FIR50": 1
+          "FIR60": 2
+          "SINC4": 3
+      - name: RATE
+        bits: "3:0"
+        access: rw
+        confirmed: true
+        description: "Data-rate index; meaning depends on LINEF and conversion type."
+  - name: CTRL
+    addr: 0x09
+    width: 1
+    access: rw
+    reset: 0x01
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.45"
+    description: "Clock source, input range, data format, reference buffers, reference select."
+    fields:
+      - name: EXTCLK
+        bits: "7"
+        access: rw
+        confirmed: true
+        description: "System clock source."
+        values:
+          "INTERNAL": 0
+          "EXTERNAL": 1
+      - name: U_BN
+        bits: "6"
+        access: rw
+        confirmed: true
+        aliases: [UNIPOLAR]
+        description: "Input range. Unipolar data is always straight binary."
+        values:
+          "BIPOLAR": 0
+          "UNIPOLAR": 1
+      - name: FORMAT
+        bits: "5"
+        access: rw
+        confirmed: true
+        description: "Bipolar data format (no effect in unipolar mode)."
+        values:
+          "TWOS_COMPLEMENT": 0
+          "OFFSET_BINARY": 1
+      - name: REFBUFP_EN
+        bits: "4"
+        access: rw
+        confirmed: true
+        aliases: [VREFP_BUF]
+        description: "Enable the reference P-side buffer."
+      - name: REFBUFN_EN
+        bits: "3"
+        access: rw
+        confirmed: true
+        aliases: [VREFN_BUF]
+        description: "Enable the reference N-side buffer."
+      - name: REF_SEL
+        bits: "2:0"
+        access: rw
+        confirmed: true
+        aliases: [REFSEL]
+        description: "Reference. 0: AIN0(REF0P)/AIN1(REF0N); 4-6 single-ended to AGND; 3 and 7 both AVDD/AGND."
+        values:
+          "REF0": 0
+          "REF1": 1
+          "REF2": 2
+          "AVDD": 3
+          "REF0P_AGND": 4
+          "REF1P_AGND": 5
+          "REF2P_AGND": 6
+          "AVDD_ALT": 7
+  - name: SOURCE
+    addr: 0x0A
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.47"
+    description: "VBIAS mode, burnout current, matched IDAC current. IDAC and VBIAS on the same input are mutually exclusive (enabling one clears the other)."
+    fields:
+      - name: VBIAS_MODE
+        bits: "7:6"
+        access: rw
+        confirmed: true
+        description: "AVDD/2 bias source."
+        values:
+          "ACTIVE": 0
+          "HIGH_Z_125K": 1
+          "LOW_Z_20K": 2
+          "LOW_Z_20K_ALT": 3
+      - name: BRN_MODE
+        bits: "5:4"
+        access: rw
+        confirmed: true
+        description: "Burnout current sources."
+        values:
+          "OFF": 0
+          "UA_0P5": 1
+          "UA_1": 2
+          "UA_10": 3
+      - name: IDAC_MODE
+        bits: "3:0"
+        access: rw
+        confirmed: true
+        description: "Matched excitation current."
+        values:
+          "UA_10": 0
+          "UA_50": 1
+          "UA_75": 2
+          "UA_100": 3
+          "UA_125": 4
+          "UA_150": 5
+          "UA_175": 6
+          "UA_200": 7
+          "UA_225": 8
+          "UA_250": 9
+          "UA_300": 10
+          "UA_400": 11
+          "UA_600": 12
+          "UA_800": 13
+          "UA_1200": 14
+          "UA_1600": 15
+  - name: MUX_CTRL0
+    addr: 0x0B
+    width: 1
+    access: rw
+    reset: 0xFF
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.48"
+    description: "Input multiplexer. 11-15 = unconnected (reset)."
+    notes: "EVKIT read 0x2A only because it had been written; not a reset value."
+    fields:
+      - name: AINP_SEL
+        bits: "7:4"
+        access: rw
+        confirmed: true
+        aliases: [AINP]
+        description: "Positive input."
+        values:
+          "AIN0": 0
+          "AIN1": 1
+          "AIN2": 2
+          "AIN3": 3
+          "AIN4": 4
+          "AIN5": 5
+          "AIN6": 6
+          "AIN7": 7
+          "AIN8": 8
+          "AIN9": 9
+          "AVDD": 10
+          "NC": 15
+      - name: AINN_SEL
+        bits: "3:0"
+        access: rw
+        confirmed: true
+        aliases: [AINN]
+        description: "Negative input."
+        values:
+          "AIN0": 0
+          "AIN1": 1
+          "AIN2": 2
+          "AIN3": 3
+          "AIN4": 4
+          "AIN5": 5
+          "AIN6": 6
+          "AIN7": 7
+          "AIN8": 8
+          "AIN9": 9
+          "GND": 10
+          "NC": 15
+  - name: MUX_CTRL1
+    addr: 0x0C
+    width: 1
+    access: rw
+    reset: 0xFF
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.49"
+    description: "Matched IDAC outputs. 10-15 = unconnected, IDAC powered down (reset)."
+    fields:
+      - name: IDAC1_SEL
+        bits: "7:4"
+        access: rw
+        confirmed: true
+        description: "IDAC1 output pin."
+        values:
+          "AIN0": 0
+          "AIN1": 1
+          "AIN2": 2
+          "AIN3": 3
+          "AIN4": 4
+          "AIN5": 5
+          "AIN6": 6
+          "AIN7": 7
+          "AIN8": 8
+          "AIN9": 9
+          "OFF": 15
+      - name: IDAC0_SEL
+        bits: "3:0"
+        access: rw
+        confirmed: true
+        description: "IDAC0 output pin."
+        values:
+          "AIN0": 0
+          "AIN1": 1
+          "AIN2": 2
+          "AIN3": 3
+          "AIN4": 4
+          "AIN5": 5
+          "AIN6": 6
+          "AIN7": 7
+          "AIN8": 8
+          "AIN9": 9
+          "OFF": 15
+  - name: MUX_CTRL2
+    addr: 0x0D
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.50"
+    description: "VBIAS switch per input AIN0-AIN7 (several may be on)."
+    fields:
+      - name: VBIAS_SEL_7
+        bits: "7"
+        access: rw
+        confirmed: true
+        description: "Connect VBIAS to AIN7."
+      - name: VBIAS_SEL_6
+        bits: "6"
+        access: rw
+        confirmed: true
+        description: "Connect VBIAS to AIN6."
+      - name: VBIAS_SEL_5
+        bits: "5"
+        access: rw
+        confirmed: true
+        description: "Connect VBIAS to AIN5."
+      - name: VBIAS_SEL_4
+        bits: "4"
+        access: rw
+        confirmed: true
+        description: "Connect VBIAS to AIN4."
+      - name: VBIAS_SEL_3
+        bits: "3"
+        access: rw
+        confirmed: true
+        description: "Connect VBIAS to AIN3."
+      - name: VBIAS_SEL_2
+        bits: "2"
+        access: rw
+        confirmed: true
+        description: "Connect VBIAS to AIN2."
+      - name: VBIAS_SEL_1
+        bits: "1"
+        access: rw
+        confirmed: true
+        description: "Connect VBIAS to AIN1."
+      - name: VBIAS_SEL_0
+        bits: "0"
+        access: rw
+        confirmed: true
+        description: "Connect VBIAS to AIN0."
+  - name: PGA
+    addr: 0x0E
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.51"
+    description: "Signal path and gain. With the buffered or bypass path GAIN is a digital gain and settings above 4x act as 4x."
+    fields:
+      - name: SIG_PATH
+        bits: "5:4"
+        access: rw
+        confirmed: true
+        description: "Signal path. 3 is reserved."
+        values:
+          "BUFFERED": 0
+          "BYPASS": 1
+          "PGA": 2
+      - name: GAIN
+        bits: "2:0"
+        access: rw
+        confirmed: true
+        description: "Gain = 2^GAIN."
+        values:
+          "X1": 0
+          "X2": 1
+          "X4": 2
+          "X8": 3
+          "X16": 4
+          "X32": 5
+          "X64": 6
+          "X128": 7
+  - name: WAIT_EXT
+    addr: 0x0F
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.52"
+    description: "Wait extension: wait clocks = (WAIT_EXT*16)*(WAIT*16), or WAIT*16 when 0."
+    fields:
+      - name: WAIT_EXT
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Wait extension multiplier."
+  - name: WAIT_START
+    addr: 0x10
+    width: 1
+    access: rw
+    reset: 0x00
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    trigger: true
+    source: "datasheet rev3 p.52"
+    description: "Writing WAIT starts a wait of (WAIT_EXT*16)*(WAIT*16) clocks (2.4576 MHz nominal: 6.5 us .. 6.77 s); reading returns the remaining count; 0 = no-op. Writing it while in standby/sleep wakes the part (PD -> normal) first."
+    fields:
+      - name: WAIT
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Wait count."
+  - name: PART_ID
+    addr: 0x11
+    width: 3
+    access: r
+    reset: 0x000F02
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.57"
+    description: "Part / silicon revision ID; reads 0x000F02 on the EVKIT."
+    notes: "Datasheet only defines REV_ID[2:0]; bits 23:3 are shown as '-'."
+    fields:
+      - name: REV_ID
+        bits: "2:0"
+        access: r
+        confirmed: true
+        description: "Silicon revision ID."
+  - name: SYSC_SEL
+    addr: 0x12
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.58"
+    description: "Per DATA register, which system calibration set (A, B or none) is applied."
+    fields:
+      - name: SYSC_SEL_7
+        bits: "15:14"
+        access: rw
+        confirmed: true
+        description: "System calibration for DATA7."
+        values:
+          "A": 0
+          "B": 1
+          "NONE": 2
+          "NONE_ALT": 3
+      - name: SYSC_SEL_6
+        bits: "13:12"
+        access: rw
+        confirmed: true
+        description: "System calibration for DATA6."
+        values:
+          "A": 0
+          "B": 1
+          "NONE": 2
+          "NONE_ALT": 3
+      - name: SYSC_SEL_5
+        bits: "11:10"
+        access: rw
+        confirmed: true
+        description: "System calibration for DATA5."
+        values:
+          "A": 0
+          "B": 1
+          "NONE": 2
+          "NONE_ALT": 3
+      - name: SYSC_SEL_4
+        bits: "9:8"
+        access: rw
+        confirmed: true
+        description: "System calibration for DATA4."
+        values:
+          "A": 0
+          "B": 1
+          "NONE": 2
+          "NONE_ALT": 3
+      - name: SYSC_SEL_3
+        bits: "7:6"
+        access: rw
+        confirmed: true
+        description: "System calibration for DATA3."
+        values:
+          "A": 0
+          "B": 1
+          "NONE": 2
+          "NONE_ALT": 3
+      - name: SYSC_SEL_2
+        bits: "5:4"
+        access: rw
+        confirmed: true
+        description: "System calibration for DATA2."
+        values:
+          "A": 0
+          "B": 1
+          "NONE": 2
+          "NONE_ALT": 3
+      - name: SYSC_SEL_1
+        bits: "3:2"
+        access: rw
+        confirmed: true
+        description: "System calibration for DATA1."
+        values:
+          "A": 0
+          "B": 1
+          "NONE": 2
+          "NONE_ALT": 3
+      - name: SYSC_SEL_0
+        bits: "1:0"
+        access: rw
+        confirmed: true
+        description: "System calibration for DATA0."
+        values:
+          "A": 0
+          "B": 1
+          "NONE": 2
+          "NONE_ALT": 3
+  - name: SYS_OFF_A
+    addr: 0x13
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.60"
+    description: "System offset A (two's complement, subtracted)."
+    fields:
+      - name: SYS_OFF_A
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Offset calibration value."
+  - name: SYS_OFF_B
+    addr: 0x14
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.61"
+    description: "System offset B (two's complement, subtracted)."
+    fields:
+      - name: SYS_OFF_B
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Offset calibration value."
+  - name: SYS_GAIN_A
+    addr: 0x15
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.62"
+    description: "System gain, unsigned 1.23 fixed point (0x800000 = 1.0; 0.5x..2x)."
+    fields:
+      - name: SYS_GAIN_A
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Gain calibration value."
+  - name: SYS_GAIN_B
+    addr: 0x16
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.63"
+    description: "System gain, unsigned 1.23 fixed point (0x800000 = 1.0; 0.5x..2x)."
+    fields:
+      - name: SYS_GAIN_B
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Gain calibration value."
+  - name: SELF_OFF
+    addr: 0x17
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.64"
+    description: "Self-calibration offset (two's complement, subtracted before gain corrections)."
+    fields:
+      - name: SELF_OFF
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-calibration offset value."
+  - name: SELF_GAIN_1
+    addr: 0x18
+    width: 3
+    access: rw
+    reset: 0xC00000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.65"
+    description: "Self-calibration gain for gain 1, unsigned 1.23 fixed point."
+    notes: "Reset value measured on hardware (0xC00000); the datasheet table leaves it blank."
+    fields:
+      - name: SELF_GAIN_1
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-gain correction value for gain = 1."
+  - name: SELF_GAIN_2
+    addr: 0x19
+    width: 3
+    access: rw
+    reset: 0xC00000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.66"
+    description: "Self-calibration gain for gain 2, unsigned 1.23 fixed point."
+    notes: "Reset value measured on hardware (0xC00000); the datasheet table leaves it blank."
+    fields:
+      - name: SELF_GAIN_2
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-gain correction value for gain = 2."
+  - name: SELF_GAIN_4
+    addr: 0x1A
+    width: 3
+    access: rw
+    reset: 0xC00000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.66"
+    description: "Self-calibration gain for gain 4, unsigned 1.23 fixed point."
+    notes: "Reset value measured on hardware (0xC00000); the datasheet table leaves it blank."
+    fields:
+      - name: SELF_GAIN_4
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-gain correction value for gain = 4."
+  - name: SELF_GAIN_8
+    addr: 0x1B
+    width: 3
+    access: rw
+    reset: 0xC00000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.67"
+    description: "Self-calibration gain for gain 8, unsigned 1.23 fixed point."
+    notes: "Reset value measured on hardware (0xC00000); the datasheet table leaves it blank."
+    fields:
+      - name: SELF_GAIN_8
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-gain correction value for gain = 8."
+  - name: SELF_GAIN_16
+    addr: 0x1C
+    width: 3
+    access: rw
+    reset: 0xC00000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.67"
+    description: "Self-calibration gain for gain 16, unsigned 1.23 fixed point."
+    notes: "Reset value measured on hardware (0xC00000); the datasheet table leaves it blank."
+    fields:
+      - name: SELF_GAIN_16
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-gain correction value for gain = 16."
+  - name: SELF_GAIN_32
+    addr: 0x1D
+    width: 3
+    access: rw
+    reset: 0xC00000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.68"
+    description: "Self-calibration gain for gain 32, unsigned 1.23 fixed point."
+    notes: "Reset value measured on hardware (0xC00000); the datasheet table leaves it blank."
+    fields:
+      - name: SELF_GAIN_32
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-gain correction value for gain = 32."
+  - name: SELF_GAIN_64
+    addr: 0x1E
+    width: 3
+    access: rw
+    reset: 0xC00000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.68"
+    description: "Self-calibration gain for gain 64, unsigned 1.23 fixed point."
+    notes: "Reset value measured on hardware (0xC00000); the datasheet table leaves it blank."
+    fields:
+      - name: SELF_GAIN_64
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-gain correction value for gain = 64."
+  - name: SELF_GAIN_128
+    addr: 0x1F
+    width: 3
+    access: rw
+    reset: 0xC00000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.69"
+    description: "Self-calibration gain for gain 128, unsigned 1.23 fixed point."
+    notes: "Reset value measured on hardware (0xC00000); the datasheet table leaves it blank."
+    fields:
+      - name: SELF_GAIN_128
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Self-gain correction value for gain = 128."
+  - name: LTHRESH0
+    addr: 0x20
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.69"
+    description: "Lower threshold for DATA0 (sets STATUS.TUR_0); same format as DATA."
+    fields:
+      - name: LTHRESH0
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Lower comparison threshold for DATA0."
+  - name: LTHRESH1
+    addr: 0x21
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.70"
+    description: "Lower threshold for DATA1 (sets STATUS.TUR_1); same format as DATA."
+    fields:
+      - name: LTHRESH1
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Lower comparison threshold for DATA1."
+  - name: LTHRESH2
+    addr: 0x22
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.70"
+    description: "Lower threshold for DATA2 (sets STATUS.TUR_2); same format as DATA."
+    fields:
+      - name: LTHRESH2
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Lower comparison threshold for DATA2."
+  - name: LTHRESH3
+    addr: 0x23
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.71"
+    description: "Lower threshold for DATA3 (sets STATUS.TUR_3); same format as DATA."
+    fields:
+      - name: LTHRESH3
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Lower comparison threshold for DATA3."
+  - name: LTHRESH4
+    addr: 0x24
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.71"
+    description: "Lower threshold for DATA4 (sets STATUS.TUR_4); same format as DATA."
+    fields:
+      - name: LTHRESH4
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Lower comparison threshold for DATA4."
+  - name: LTHRESH5
+    addr: 0x25
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.72"
+    description: "Lower threshold for DATA5 (sets STATUS.TUR_5); same format as DATA."
+    fields:
+      - name: LTHRESH5
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Lower comparison threshold for DATA5."
+  - name: LTHRESH6
+    addr: 0x26
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.72"
+    description: "Lower threshold for DATA6 (sets STATUS.TUR_6); same format as DATA."
+    fields:
+      - name: LTHRESH6
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Lower comparison threshold for DATA6."
+  - name: LTHRESH7
+    addr: 0x27
+    width: 3
+    access: rw
+    reset: 0x800000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.73"
+    description: "Lower threshold for DATA7 (sets STATUS.TUR_7); same format as DATA."
+    fields:
+      - name: LTHRESH7
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Lower comparison threshold for DATA7."
+  - name: UTHRESH0
+    addr: 0x28
+    width: 3
+    access: rw
+    reset: 0x7FFFFF
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.73"
+    description: "Upper threshold for DATA0 (sets STATUS.TOR_0); same format as DATA."
+    fields:
+      - name: UTHRESH0
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Upper comparison threshold for DATA0."
+  - name: UTHRESH1
+    addr: 0x29
+    width: 3
+    access: rw
+    reset: 0x7FFFFF
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.74"
+    description: "Upper threshold for DATA1 (sets STATUS.TOR_1); same format as DATA."
+    fields:
+      - name: UTHRESH1
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Upper comparison threshold for DATA1."
+  - name: UTHRESH2
+    addr: 0x2A
+    width: 3
+    access: rw
+    reset: 0x7FFFFF
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.74"
+    description: "Upper threshold for DATA2 (sets STATUS.TOR_2); same format as DATA."
+    fields:
+      - name: UTHRESH2
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Upper comparison threshold for DATA2."
+  - name: UTHRESH3
+    addr: 0x2B
+    width: 3
+    access: rw
+    reset: 0x7FFFFF
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.75"
+    description: "Upper threshold for DATA3 (sets STATUS.TOR_3); same format as DATA."
+    fields:
+      - name: UTHRESH3
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Upper comparison threshold for DATA3."
+  - name: UTHRESH4
+    addr: 0x2C
+    width: 3
+    access: rw
+    reset: 0x7FFFFF
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.75"
+    description: "Upper threshold for DATA4 (sets STATUS.TOR_4); same format as DATA."
+    fields:
+      - name: UTHRESH4
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Upper comparison threshold for DATA4."
+  - name: UTHRESH5
+    addr: 0x2D
+    width: 3
+    access: rw
+    reset: 0x7FFFFF
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.76"
+    description: "Upper threshold for DATA5 (sets STATUS.TOR_5); same format as DATA."
+    fields:
+      - name: UTHRESH5
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Upper comparison threshold for DATA5."
+  - name: UTHRESH6
+    addr: 0x2E
+    width: 3
+    access: rw
+    reset: 0x7FFFFF
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.76"
+    description: "Upper threshold for DATA6 (sets STATUS.TOR_6); same format as DATA."
+    fields:
+      - name: UTHRESH6
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Upper comparison threshold for DATA6."
+  - name: UTHRESH7
+    addr: 0x2F
+    width: 3
+    access: rw
+    reset: 0x7FFFFF
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.77"
+    description: "Upper threshold for DATA7 (sets STATUS.TOR_7); same format as DATA."
+    fields:
+      - name: UTHRESH7
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Upper comparison threshold for DATA7."
+  - name: DATA0
+    addr: 0x30
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.77"
+    description: "Conversion result 0 (when DEST/GP_DEST = 0). Reading it clears its DATA_RDY flag."
+    fields:
+      - name: DATA0
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Conversion data."
+  - name: DATA1
+    addr: 0x31
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.78"
+    description: "Conversion result 1 (when DEST/GP_DEST = 1). Reading it clears its DATA_RDY flag."
+    fields:
+      - name: DATA1
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Conversion data."
+  - name: DATA2
+    addr: 0x32
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.78"
+    description: "Conversion result 2 (when DEST/GP_DEST = 2). Reading it clears its DATA_RDY flag."
+    fields:
+      - name: DATA2
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Conversion data."
+  - name: DATA3
+    addr: 0x33
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.79"
+    description: "Conversion result 3 (when DEST/GP_DEST = 3). Reading it clears its DATA_RDY flag."
+    fields:
+      - name: DATA3
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Conversion data."
+  - name: DATA4
+    addr: 0x34
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.79"
+    description: "Conversion result 4 (when DEST/GP_DEST = 4). Reading it clears its DATA_RDY flag."
+    fields:
+      - name: DATA4
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Conversion data."
+  - name: DATA5
+    addr: 0x35
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.80"
+    description: "Conversion result 5 (when DEST/GP_DEST = 5). Reading it clears its DATA_RDY flag."
+    fields:
+      - name: DATA5
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Conversion data."
+  - name: DATA6
+    addr: 0x36
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.80"
+    description: "Conversion result 6 (when DEST/GP_DEST = 6). Reading it clears its DATA_RDY flag."
+    fields:
+      - name: DATA6
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Conversion data."
+  - name: DATA7
+    addr: 0x37
+    width: 3
+    access: rw
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.81"
+    description: "Conversion result 7 (when DEST/GP_DEST = 7). Reading it clears its DATA_RDY flag."
+    fields:
+      - name: DATA7
+        bits: "23:0"
+        access: rw
+        confirmed: true
+        description: "Conversion data."
+  - name: STATUS
+    addr: 0x38
+    width: 3
+    access: r
+    reset: 0x000000
+    reset_source: hardware
+    reset_confirmed: true
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.81"
+    description: "Status flags; most clear when STATUS is read."
+    fields:
+      - name: TOR_7
+        bits: "23"
+        access: rc
+        confirmed: true
+        description: "DATA7 above UTHRESH7 / digital over-range."
+      - name: TOR_6
+        bits: "22"
+        access: rc
+        confirmed: true
+        description: "DATA6 above UTHRESH6 / digital over-range."
+      - name: TOR_5
+        bits: "21"
+        access: rc
+        confirmed: true
+        description: "DATA5 above UTHRESH5 / digital over-range."
+      - name: TOR_4
+        bits: "20"
+        access: rc
+        confirmed: true
+        description: "DATA4 above UTHRESH4 / digital over-range."
+      - name: TOR_3
+        bits: "19"
+        access: rc
+        confirmed: true
+        description: "DATA3 above UTHRESH3 / digital over-range."
+      - name: TOR_2
+        bits: "18"
+        access: rc
+        confirmed: true
+        description: "DATA2 above UTHRESH2 / digital over-range."
+      - name: TOR_1
+        bits: "17"
+        access: rc
+        confirmed: true
+        description: "DATA1 above UTHRESH1 / digital over-range."
+      - name: TOR_0
+        bits: "16"
+        access: rc
+        confirmed: true
+        description: "DATA0 above UTHRESH0 / digital over-range."
+      - name: TUR_7
+        bits: "15"
+        access: rc
+        confirmed: true
+        description: "DATA7 below LTHRESH7 / digital under-range."
+      - name: TUR_6
+        bits: "14"
+        access: rc
+        confirmed: true
+        description: "DATA6 below LTHRESH6 / digital under-range."
+      - name: TUR_5
+        bits: "13"
+        access: rc
+        confirmed: true
+        description: "DATA5 below LTHRESH5 / digital under-range."
+      - name: TUR_4
+        bits: "12"
+        access: rc
+        confirmed: true
+        description: "DATA4 below LTHRESH4 / digital under-range."
+      - name: TUR_3
+        bits: "11"
+        access: rc
+        confirmed: true
+        description: "DATA3 below LTHRESH3 / digital under-range."
+      - name: TUR_2
+        bits: "10"
+        access: rc
+        confirmed: true
+        description: "DATA2 below LTHRESH2 / digital under-range."
+      - name: TUR_1
+        bits: "9"
+        access: rc
+        confirmed: true
+        description: "DATA1 below LTHRESH1 / digital under-range."
+      - name: TUR_0
+        bits: "8"
+        access: rc
+        confirmed: true
+        description: "DATA0 below LTHRESH0 / digital under-range."
+      - name: SYSGOR
+        bits: "7"
+        access: rc
+        confirmed: true
+        description: "System gain calibration over-range."
+      - name: DATA_RDY
+        bits: "4"
+        access: r
+        confirmed: true
+        description: "A DATA register holds an unread result (cleared by reading the DATA registers, not by reading STATUS)."
+      - name: WAIT_DONE
+        bits: "3"
+        access: rc
+        confirmed: true
+        description: "WAIT finished."
+      - name: CAL_RDY
+        bits: "2"
+        access: rc
+        confirmed: true
+        aliases: [CAL_READY]
+        description: "Calibration finished."
+      - name: SEQ_RDY
+        bits: "1"
+        access: rc
+        confirmed: true
+        description: "Sequence completed at least one iteration."
+      - name: CONV_RDY
+        bits: "0"
+        access: rc
+        confirmed: true
+        aliases: [CONV_READY]
+        description: "New conversion result available (also cleared by a CONV_START write)."
+  - name: STATUS_IE
+    addr: 0x39
+    width: 3
+    access: rw
+    reset: 0x000001
+    reset_source: datasheet+hardware
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.85"
+    description: "Which STATUS bits assert INT (DOUT/INTB with CS low, or INTRB on a GPIO). Default enables CONV_RDY only, which is what EVKIT command 0x51 waits on."
+    fields:
+      - name: TOR_IE_7
+        bits: "23"
+        access: rw
+        confirmed: true
+        description: "TOR_7 drives INT."
+      - name: TOR_IE_6
+        bits: "22"
+        access: rw
+        confirmed: true
+        description: "TOR_6 drives INT."
+      - name: TOR_IE_5
+        bits: "21"
+        access: rw
+        confirmed: true
+        description: "TOR_5 drives INT."
+      - name: TOR_IE_4
+        bits: "20"
+        access: rw
+        confirmed: true
+        description: "TOR_4 drives INT."
+      - name: TOR_IE_3
+        bits: "19"
+        access: rw
+        confirmed: true
+        description: "TOR_3 drives INT."
+      - name: TOR_IE_2
+        bits: "18"
+        access: rw
+        confirmed: true
+        description: "TOR_2 drives INT."
+      - name: TOR_IE_1
+        bits: "17"
+        access: rw
+        confirmed: true
+        description: "TOR_1 drives INT."
+      - name: TOR_IE_0
+        bits: "16"
+        access: rw
+        confirmed: true
+        description: "TOR_0 drives INT."
+      - name: TUR_IE_7
+        bits: "15"
+        access: rw
+        confirmed: true
+        description: "TUR_7 drives INT."
+      - name: TUR_IE_6
+        bits: "14"
+        access: rw
+        confirmed: true
+        description: "TUR_6 drives INT."
+      - name: TUR_IE_5
+        bits: "13"
+        access: rw
+        confirmed: true
+        description: "TUR_5 drives INT."
+      - name: TUR_IE_4
+        bits: "12"
+        access: rw
+        confirmed: true
+        description: "TUR_4 drives INT."
+      - name: TUR_IE_3
+        bits: "11"
+        access: rw
+        confirmed: true
+        description: "TUR_3 drives INT."
+      - name: TUR_IE_2
+        bits: "10"
+        access: rw
+        confirmed: true
+        description: "TUR_2 drives INT."
+      - name: TUR_IE_1
+        bits: "9"
+        access: rw
+        confirmed: true
+        description: "TUR_1 drives INT."
+      - name: TUR_IE_0
+        bits: "8"
+        access: rw
+        confirmed: true
+        description: "TUR_0 drives INT."
+      - name: SYSGOR_IE
+        bits: "7"
+        access: rw
+        confirmed: true
+        description: "SYSGOR drives INT."
+      - name: DATA_RDY_IE
+        bits: "4"
+        access: rw
+        confirmed: true
+        description: "DATA_RDY drives INT."
+      - name: WAIT_DONE_IE
+        bits: "3"
+        access: rw
+        confirmed: true
+        description: "WAIT_DONE drives INT."
+      - name: CAL_RDY_IE
+        bits: "2"
+        access: rw
+        confirmed: true
+        description: "CAL_RDY drives INT."
+      - name: SEQ_RDY_IE
+        bits: "1"
+        access: rw
+        confirmed: true
+        description: "SEQ_RDY drives INT."
+      - name: CONV_RDY_IE
+        bits: "0"
+        access: rw
+        confirmed: true
+        description: "CONV_RDY drives INT."
+  - name: UC0
+    addr: 0x3A
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 0 (uC0): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC1
+    addr: 0x3B
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 1 (uC1): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC2
+    addr: 0x3C
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 2 (uC2): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC3
+    addr: 0x3D
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 3 (uC3): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC4
+    addr: 0x3E
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 4 (uC4): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC5
+    addr: 0x3F
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 5 (uC5): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC6
+    addr: 0x40
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 6 (uC6): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC7
+    addr: 0x41
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 7 (uC7): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC8
+    addr: 0x42
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 8 (uC8): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC9
+    addr: 0x43
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 9 (uC9): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC10
+    addr: 0x44
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 10 (uC10): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC11
+    addr: 0x45
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 11 (uC11): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC12
+    addr: 0x46
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 12 (uC12): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC13
+    addr: 0x47
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 13 (uC13): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC14
+    addr: 0x48
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 14 (uC14): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC15
+    addr: 0x49
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 15 (uC15): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC16
+    addr: 0x4A
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 16 (uC16): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC17
+    addr: 0x4B
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 17 (uC17): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC18
+    addr: 0x4C
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 18 (uC18): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC19
+    addr: 0x4D
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 19 (uC19): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC20
+    addr: 0x4E
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 20 (uC20): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC21
+    addr: 0x4F
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 21 (uC21): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC22
+    addr: 0x50
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 22 (uC22): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC23
+    addr: 0x51
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 23 (uC23): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC24
+    addr: 0x52
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 24 (uC24): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC25
+    addr: 0x53
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 25 (uC25): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC26
+    addr: 0x54
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 26 (uC26): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC27
+    addr: 0x55
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 27 (uC27): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC28
+    addr: 0x56
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 28 (uC28): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC29
+    addr: 0x57
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 29 (uC29): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC30
+    addr: 0x58
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 30 (uC30): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC31
+    addr: 0x59
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 31 (uC31): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC32
+    addr: 0x5A
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 32 (uC32): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC33
+    addr: 0x5B
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 33 (uC33): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC34
+    addr: 0x5C
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 34 (uC34): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC35
+    addr: 0x5D
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 35 (uC35): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC36
+    addr: 0x5E
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 36 (uC36): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC37
+    addr: 0x5F
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 37 (uC37): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC38
+    addr: 0x60
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 38 (uC38): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC39
+    addr: 0x61
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 39 (uC39): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC40
+    addr: 0x62
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 40 (uC40): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC41
+    addr: 0x63
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 41 (uC41): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC42
+    addr: 0x64
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 42 (uC42): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC43
+    addr: 0x65
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 43 (uC43): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC44
+    addr: 0x66
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 44 (uC44): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC45
+    addr: 0x67
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 45 (uC45): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC46
+    addr: 0x68
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 46 (uC46): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC47
+    addr: 0x69
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 47 (uC47): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC48
+    addr: 0x6A
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 48 (uC48): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC49
+    addr: 0x6B
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 49 (uC49): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC50
+    addr: 0x6C
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 50 (uC50): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC51
+    addr: 0x6D
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 51 (uC51): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UC52
+    addr: 0x6E
+    width: 2
+    access: rw
+    reset: 0x0000
+    reset_source: datasheet
+    reset_confirmed: true
+    confirmed: true
+    source: "datasheet rev3 p.90"
+    description: "Sequencer microcode word 52 (uC52): write REG_DATA to 8-bit register REG_ADDR. 0x0000 (PD=NORMAL) stops a sequence."
+    fields:
+      - name: REG_ADDR
+        bits: "14:8"
+        access: rw
+        confirmed: true
+        description: "Address of the 8-bit control register to write."
+      - name: REG_DATA
+        bits: "7:0"
+        access: rw
+        confirmed: true
+        description: "Value to write."
+  - name: UCADDR
+    addr: 0x6F
+    width: 2
+    access: r
+    reset: null
+    reset_confirmed: false
+    confirmed: true
+    volatile: true
+    source: "datasheet rev3 p.90"
+    description: "Address of the sequencer command being executed (uCADDR); 0x3A-0x6E while a sequence is active."
+    notes: "Reset value not given in the datasheet."
+    fields:
+      - name: UCADDR
+        bits: "6:0"
+        access: r
+        confirmed: true
+        description: "Current sequencer address."

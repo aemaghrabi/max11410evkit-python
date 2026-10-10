@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -20,8 +21,9 @@ from PySide6.QtWidgets import (
 )
 
 from .. import placeholder_regmap as rm
-from ..theme import mono_font
-from ..widgets import compact_form, muted, primary_button
+from ..channels import ChannelStore, channel_label
+from ..theme import ThemeManager, channel_color, mono_font
+from ..widgets import compact_form, dot_icon, muted, primary_button
 
 
 def _centered(w: QWidget) -> QWidget:
@@ -46,8 +48,9 @@ class OtherTab(QWidget):
 
     COLS = ["Lower threshold", "Upper threshold", "TUR INT", "TOR INT"]
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, store: ChannelStore | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.store = store or ChannelStore(self)
         self._loading = False
         root = QHBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
@@ -85,7 +88,6 @@ class OtherTab(QWidget):
 
         t = QTableWidget(8, len(self.COLS))
         t.setHorizontalHeaderLabels(self.COLS)
-        t.setVerticalHeaderLabels([f"Channel {i}" for i in range(8)])
         t.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         t.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         for c in (2, 3):
@@ -115,6 +117,9 @@ class OtherTab(QWidget):
             self.int_boxes.append((tur, tor))
         t.itemChanged.connect(self._on_item)
         self.table = t
+        self.store.changed.connect(lambda _ch: self._label_channels())
+        ThemeManager.instance().changed.connect(self._label_channels)
+        self._label_channels()
         lay.addWidget(t)
         return g
 
@@ -199,6 +204,20 @@ class OtherTab(QWidget):
         )
 
     # ---------------------------------------------------------------- public API
+    def _label_channels(self) -> None:
+        """Row headers show the channel names; disabled channels are dimmed."""
+        c = ThemeManager.instance().colors
+        for ch in range(self.table.rowCount()):
+            cfg = self.store.get(ch)
+            on = bool(cfg.get("enabled"))
+            it = QTableWidgetItem(channel_label(ch, cfg))
+            it.setIcon(dot_icon(channel_color(ch) if on else c.border))
+            it.setForeground(QColor(c.text if on else c.muted))
+            it.setToolTip(
+                f"Channel {ch}{'' if on else ' (disabled)'} — DATA{ch}, LTHRESH{ch}/UTHRESH{ch}"
+            )
+            self.table.setVerticalHeaderItem(ch, it)
+
     @Slot(list, str)
     def set_thresholds(self, rows: list, unit: str) -> None:
         """rows: 8 x (lower, upper) already expressed in ``unit``."""

@@ -1,14 +1,65 @@
-# MAX11410 EV Kit GUI: design draft
+# MAX11410 EV Kit GUI: design draft (rev 2, per-channel configuration)
 
-Status: **clickable mockup** (Phase 1 design). This is PySide6 + pyqtgraph. It is *not* wired to
-hardware yet. `gui/mock_backend.py` fakes every result. Run it with:
+Status: this is a **clickable mockup** built with PySide6 and pyqtgraph. It is *not* wired to
+hardware yet; `gui/mock_backend.py` fakes every result. When the mock starts, it loads a demo set of
+four enabled channels:
+
+| Ch | Name | Input | Path | Reference |
+|---|---|---|---|---|
+| 0 | AIN2 single-ended | AIN2 – GND | Buffered | REF0, 2.5 V |
+| 1 | Load-cell bridge | AIN0 – AIN1 | PGA ×128 | REF1, ratiometric |
+| 2 | PT100 RTD | AIN4 – AIN5 | PGA ×16 | REF2, with IDAC |
+| 3 | Thermocouple K | AIN6 – AIN7 | PGA ×32 | REF0 |
 
 ```bash
 PYTHONPATH=src python -m max11410_evkit.gui            # --theme light|dark|system, --no-mock
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src python docs/gui/render_screenshots.py   # PNGs
 ```
 
-Screenshots are in `docs/gui/screenshots/<tab>.png` (light) and `docs/gui/screenshots/dark/<tab>.png`.
+Screenshots are in `docs/gui/screenshots/<tab>.png` (light) and `docs/gui/screenshots/dark/<tab>.png` (dark).
+
+## What changed in rev 2
+
+Rev 2 makes the ADC configurable **per channel**. On the MAX11410 the MUX, CTRL, PGA and FILTER
+registers are *global*, so a "channel" is a host-side concept. It works like the per-channel
+device-tree nodes in the Linux driver. There are 8 channels (0–7), and they line up with:
+
+- DATA0–DATA7
+- LTHRESH/UTHRESH0–7
+- the sequencer
+
+Before the backend converts a channel, it writes that channel's configuration into the global
+registers.
+
+| Per-channel (`CHANNEL_KEYS`) | Global (`DEVICE_KEYS`) |
+|---|---|
+| `name`, `enabled` | `conv_mode` (single / continuous / duty cycle) |
+| `ainp`, `ainn` | `power` (normal / standby / sleep) |
+| `sig_path`, `pga_gain` | `idac_current_ua`, `idac0_pin`, `idac1_pin` |
+| `refsel`, `vrefp_buf`, `vrefn_buf`, `vref` (V) | `vbias_mode`, `vbias_pins` |
+| `unipolar`, `format` | `burnout` |
+| `filter`, `rate` (sps), `settling_ms` | *(Other tab: clock, GPIO, wait timer; Sequence tab: sequencer; calibration actions)* |
+
+The defaults are in `placeholder_regmap.CHANNEL_DEFAULTS` and `DEVICE_DEFAULTS`. Channel 0 is
+enabled at startup with the EV-kit defaults: AIN2–GND, 60Hz SINC4, 59.8 sps, Continuous.
+
+### Shared channel model
+
+`gui/channels.py` provides `ChannelStore(QObject)`, the single in-GUI source of truth. It holds the
+8 configs and the *active* channel. `MainWindow` creates one store (`win.channels`) and passes it
+to the tabs:
+
+- The **ADC Config** tab edits the store.
+- **Other**, **Scope**, **DMM**, **Histogram** and **FFT** only read it, to get names, colours,
+  enabled flags and rates. They follow `ChannelStore.changed(int ch)` (where `-1` means all) and
+  `activeChanged(int)`.
+
+`channels.py` also contains small helpers: `channel_label`, `input_text`, `range_text`,
+`filter_text` and `lsb_volts`.
+
+Every channel has a fixed colour (`theme.channel_color(ch)`, one palette for light and one for
+dark). The colour is used everywhere: the dot in the channel table, the selector chips, the plot
+traces, the DMM tiles and the threshold row headers.
 
 ## Package layout
 
@@ -16,294 +67,249 @@ Screenshots are in `docs/gui/screenshots/<tab>.png` (light) and `docs/gui/screen
 src/max11410_evkit/gui/
   __init__.py, __main__.py   python -m max11410_evkit.gui
   app.py                     main(), build_window(theme, mock)
-  main_window.py             MainWindow: tabs, Status Log, menus, status bar
-  status_log.py              StatusLog group box (timestamped, levelled lines, Clear Log)
-  theme.py                   Fusion + light/dark QPalette + stylesheet, ThemeManager.changed
-  widgets.py                 CaptureBar, StatsPanel, ThemedPlot, IntAxis, Led, BitStrip,
-                             HexDelegate, fmt_si/fmt_hex
-  placeholder_regmap.py      PLACEHOLDER registers / option tables (replaced by Phase 2 regmap.yaml)
-  mock_backend.py            MockBackend(QObject): fake data + log lines
-  tabs/
-    adc_config.py other.py sequence.py registers.py scope.py dmm.py histogram.py fft.py
-    _regtable.py             RegisterTable (shared by Registers + Sequence)
+  main_window.py             MainWindow: ChannelStore, tabs, Status Log, menus, status bar
+  channels.py                ChannelStore + channel text/LSB helpers
+  status_log.py              StatusLog group box
+  theme.py                   Fusion + light/dark palettes, stylesheet, channel colours
+  widgets.py                 ChannelChips, CaptureBar, StatsPanel, ThemedPlot, IntAxis, Led,
+                             BitStrip, HexDelegate, dot_icon, fmt_si/fmt_hex
+  placeholder_regmap.py      PLACEHOLDER registers / options / CHANNEL_ & DEVICE_DEFAULTS
+  mock_backend.py            MockBackend: per-channel fake data + log lines
+  tabs/ adc_config.py other.py sequence.py registers.py scope.py dmm.py histogram.py fft.py _regtable.py
 ```
 
-**Rule:** nothing under `gui/` imports `max11410_evkit.board` or `max11410_evkit.transport`. Later
-wiring goes into a controller (Phase 5–7). The controller replaces `MockBackend`. It connects to
-the tab **signals** (user intents) and calls the tab **slots** (results). That is the same pattern
-`MockBackend._wire()` uses today, so that method is the reference for the wiring.
+**Rule:** nothing under `gui/` imports `board`, `transport` or `device`. The Phase 5–7 controller
+replaces `MockBackend`. It connects to the tab **signals** (user intents) and calls the tab **slots**
+(results). `MockBackend._wire()` is the reference for that wiring.
 
 ## Main window
 
-- `QTabWidget` on top, in this order: ADC Config, Other, Sequence, Registers, Scope, DMM, Histogram, FFT.
-- A vertical `QSplitter` sits between the tabs and the **Status Log** group box. The log shows a
-  timestamp, a level tag (OK / WARN / ERR) and a message, with a **Clear Log** button on the right.
-- The status bar has a permanent widget at the bottom right: a LED plus "EV Kit Hardware Connected" or
-  "EV Kit Hardware Disconnected", with an optional detail (for example `MOCK`, or the serial/HID path later).
+- Tabs on top: ADC Config, Other, Sequence, Registers, Scope, DMM, Histogram, FFT.
+- **Status Log** below the tabs, separated by a splitter. The status bar shows the connection state
+  at the bottom right.
 - Menus:
-  - File: Save ADC Config As…, Save ADC Config, Load ADC Config…, Exit
-  - Options: Save Graph ▸ Scope / Histogram / FFT (PNG via `QWidget.grab`)
-  - View: Theme ▸ Follow System / Light / Dark
-  - Help: About
+  - **File:** Save ADC Config As…, Save, Load…, Exit
+  - **Options:** Save Graph ▸ Scope / Histogram / FFT
+  - **View:** Theme ▸ System / Light / Dark
+  - **Help:** About
 
 | MainWindow API | Kind | Notes |
 |---|---|---|
-| `set_connected(connected: bool, detail: str = "")` | slot | status-bar LED and text |
-| `log(message: str, level="info")` | slot | level ∈ info/ok/warn/error |
-| `saveConfigRequested(str path)` / `loadConfigRequested(str path)` | signal | emitted *after* the GUI wrote or read the JSON |
-| `themeChanged(str mode)` | signal | |
-| `adc_tab, other_tab, sequence_tab, registers_tab, scope_tab, dmm_tab, histogram_tab, fft_tab` | attrs | tab instances |
+| `channels` | attr | shared `ChannelStore` |
+| `set_connected(connected, detail="")`, `log(message, level="info")` | slots | |
+| `saveConfigRequested(path)`, `loadConfigRequested(path)`, `themeChanged(mode)` | signals | |
+
+### Config file (File ▸ Save / Load)
+
+The file is JSON and contains the whole ADC configuration, **including every channel**:
+
+```json
+{ "format": "max11410-evkit-adc-config", "version": 2,
+  "device": { "conv_mode": "Continuous", "power": "Normal", "idac_current_ua": 250, ... },
+  "active_channel": 1,
+  "channels": { "0": { "name": "AIN2 single-ended", "enabled": true, "ainp": "AIN2", ... },
+                "1": { ... }, ..., "7": { ... } } }
+```
+
+`AdcConfigTab.config()` produces this structure and `set_config()` reads it back. Any channel
+missing from the file is reset to the defaults and disabled.
 
 ## Tabs: layout and signal/slot contract
 
-The conventions are the same on every tab:
+These conventions apply to every tab:
 
-- Signals are named `…Requested` or `…Changed`.
-- Slots are named `show_*` or `set_*`.
-- Slots never emit intent signals. They load values with signals blocked or behind a `_loading` guard.
-- Voltages are in volts, frequencies in Hz, rates in sps.
+- Signals are named `…Requested`, `…Changed` or `…Selected`.
+- Slots are named `show_*` or `set_*`, and never emit intent signals.
+- Units are V, Hz and sps.
+- Wherever several channels are involved, results are passed as **dicts keyed by channel**.
 
-### ADC Config (`AdcConfigTab`)
+### ADC Config (`AdcConfigTab(store)`)
 
-The layout has four columns that follow the block diagram from left to right:
+The tab is split into two parts with explicit badges.
 
-1. **Input**: Input Multiplexer (AINP/AINN: AIN0–9, AVDD, GND) and Excitation (IDAC current, IDAC0/1
-   pins, VBIAS mode, VBIAS pins AIN0–9, Burn-out).
-2. **Analog front end**: Signal Path (Buffered / Bypass / PGA radios; the PGA gain ×1…×128 control
-   is enabled only on the PGA path) and Reference (REFSEL with 7 options, VREFP/VREFN buffer
-   checkboxes, Ref. voltage in V).
-3. **Modulator & filter**:
-   - Digital Filter: filter type, plus a data-rate list that depends on the filter, plus a summary
-     such as "60Hz SINC4 · 59.8 sps".
-   - Conversion: mode (Single, Continuous or Duty cycle) and Channel 0–7 (DATAn).
-   - Data Format: Bipolar/Unipolar, and Two's complement/Offset binary.
-4. **Control**: Calibration (Self, PGA, System Offset, System Gain), Power (Normal, Standby or Sleep) and
-   Serial Interface (**Read All**, **Convert**).
+**PER-CHANNEL** (left), from top to bottom:
 
-A **Read Data and Status** strip spans the bottom. It shows:
+1. A **Channels** table with columns Ch (colour dot), On (checkbox), Name, Input, Range (for
+   example `±25.78 mV · ×128`), Filter / rate and Last reading. Disabled rows are dimmed. Buttons
+   on the right:
+   - **Add** enables the next free channel with the default settings.
+   - **Duplicate** copies the selected channel into the next free slot as "… (copy)".
+   - **Reset** restores the selected channel to the defaults.
+2. A **Channel n — name** editor for the selected row, in three columns:
+   - **Input:** Name, AINP, AINN, Settling
+   - **Path & reference:** Buffered/Bypass/PGA, PGA gain, REFSEL, Ref. voltage, VREFP/VREFN buffers
+   - **Filter & format:** Filter, Data rate, Bipolar/Unipolar, Coding, plus a summary such as
+     "20Hz SINC4 · 20 sps"
+3. **Read Data and Status** for the last conversion: STATUS with the CONV_READY and CAL_READY LEDs,
+   DATAn, the code, and a readout with the channel name, 1 LSB and the voltage.
 
-- STATUS in hex, with CONV_READY and CAL_READY LEDs
-- DATAn in hex, the signed code, and 1 LSB
-- a large voltage readout
-
-The startup defaults come from `placeholder_regmap.STARTUP_DEFAULTS`: 60Hz SINC4, 59.8 sps,
-AIN2/GND, Channel 0, Continuous.
+**GLOBAL** (right): Conversion & Power, Calibration, Excitation (IDAC / VBIAS / burn-out) and Serial
+Interface. Serial Interface has three buttons: **Read All**, **Convert Ch n** (the selected channel)
+and **Convert All Enabled**.
 
 | Signal | Args |
 |---|---|
-| `settingChanged` | `(key: str, value)`. Keys: `ainp ainn sig_path pga_gain unipolar format filter rate conv_mode channel refsel vrefp_buf vrefn_buf power idac_current_ua idac0_pin idac1_pin vbias_mode vbias_pins burnout` |
-| `referenceVoltageChanged` | `(volts: float)` |
+| `channelConfigChanged` | `(ch: int, cfg: dict)`. `cfg` is the **full** channel config after the edit; any editor change, enable toggle, Add, Duplicate or Reset emits it. |
+| `channelSelected` | `(ch: int)`. The editor now shows `ch`. |
+| `channelEnabledChanged` | `(ch: int, enabled: bool)`. Emitted before the matching `channelConfigChanged`. |
+| `settingChanged` | `(key: str, value)`. **Global keys only** (`DEVICE_KEYS`). |
 | `readAllRequested` | `()` |
-| `convertRequested` | `()` |
-| `calibrationRequested` | `(kind: str)`. `self` / `pga` / `sys_offset` / `sys_gain` |
+| `convertRequested` | `(ch: int)`. The backend applies `ch`'s config, then converts into DATAch. |
+| `convertAllRequested` | `()`. Convert every enabled channel in order. |
+| `calibrationRequested` | `(kind: "self"\|"pga"\|"sys_offset"\|"sys_gain", ch: int)`. Calibrate using `ch`'s config. |
 
 | Slot / method | Args |
 |---|---|
-| `set_config(cfg: dict)` | Uses the same keys as `settingChanged`, plus `vref`. Partial dicts are OK. Does not emit. |
-| `config() -> dict` | Snapshot of the full control state. Used by File ▸ Save. |
-| `show_read_data(status, data, volts, code=None, lsb_volts=None)` | `status` and `data` are raw register ints. `code` is signed LSB. |
+| `set_channel_configs(configs: dict[int\|str, dict])` | Replaces all 8 configs (missing ones are reset and disabled). Does not emit. |
+| `channel_configs() -> dict[int, dict]` | |
+| `set_active_channel(ch)`, `active_channel()` | |
+| `set_device_config(cfg)`, `device_config() -> dict` | global keys |
+| `config() -> dict`, `set_config(cfg)` | file format above |
+| `show_read_data(ch, status, data, volts, code=None, lsb_volts=None)` | Also fills the channel's "Last reading" cell. |
 
-### Other (`OtherTab`)
+### Other (`OtherTab(store)`)
 
-- **Left:** a Channel Thresholds table. It has rows Channel 0–7 and columns Lower and Upper threshold,
-  plus TUR INT and TOR INT checkboxes. A Threshold units combo (LSB, V, mV, µV) sits above it.
-- **Right:** three group boxes:
-  - **Wait Timer**: Wait, Wait extension, the computed wait time, a note that the clock is
-    2.4576 MHz, and the Calculate Wait Time and Start Wait Time buttons.
-  - **Clock**: Internal or External.
-  - **GPIO**: GPIO0 and GPIO1 mode.
-- **Read All** sits at the bottom right.
+The Channel Thresholds rows are labelled with the **channel names and colours**, for example
+"1 · Load-cell bridge". Disabled channels are dimmed. Wait Timer, Clock and GPIO stay global.
+
+The signals and slots are unchanged from rev 1:
+
+- **Signals:** `readAllRequested`, `thresholdUnitChanged`, `thresholdChanged(ch, which, value, unit)`,
+  `thresholdInterruptChanged(ch, which, on)`, `waitCalcRequested(wait, ext)`,
+  `waitStartRequested(wait, ext)`, `clockSourceChanged`, `gpioModeChanged`.
+- **Slots:** `set_thresholds`, `set_threshold_interrupts`, `show_wait_time`, `set_wait`,
+  `set_clock_source`, `set_gpio_mode`.
+
+### Measurement tabs: channel selection
+
+Each measurement tab has a row of **channel chips**. There is one chip per *enabled* channel,
+showing the colour dot and "n · name". The chips follow the store live.
+
+- **Scope** and **DMM** use multi-select. The first selected channel is the *primary* one.
+- **Histogram** and **FFT** use single-select.
+
+The data rate belongs to the channel config, so the capture bar no longer has a rate control. It
+shows "59.8 sps (from channel config)", or "mixed rates" when the selected channels differ.
+
+#### Scope (`ScopeTab(store)`)
+
+- **Controls:** channel chips (multi), Display unit (Voltage or LSB), Samples, Capture.
+- **Plot:** one coloured trace per channel with a legend. Each trace uses its own time axis,
+  `t = i / rate[ch]`.
+- **Right:** a Statistics panel with a channel combo at the top.
 
 | Signal | Args |
 |---|---|
-| `readAllRequested` | `()` |
-| `thresholdUnitChanged` | `(unit: str)` |
-| `thresholdChanged` | `(channel: int, which: "lower"\|"upper", value: float, unit: str)` |
-| `thresholdInterruptChanged` | `(channel: int, which: "tur"\|"tor", enabled: bool)` |
-| `waitCalcRequested` / `waitStartRequested` | `(wait: int, wait_ext: int)` |
-| `clockSourceChanged` | `("internal"\|"external")` |
-| `gpioModeChanged` | `(gpio: int, mode: str)` |
+| `captureRequested` | `(channels: list[int], n_samples: int)` |
+| `channelsSelected` | `(channels: list[int])` |
+| `displayUnitChanged` | `(unit: "Voltage"\|"LSB")` |
 
 | Slot | Args |
 |---|---|
-| `set_thresholds(rows, unit)` | 8 × `(lower, upper)` already in `unit` |
-| `set_threshold_interrupts(flags)` | 8 × `(tur: bool, tor: bool)` |
-| `show_wait_time(seconds)` | |
-| `set_wait(wait, wait_ext)`, `set_clock_source(src)`, `set_gpio_mode(gpio, mode)` | |
+| `show_capture(data, rates, lsb_volts, stats)` | Every argument is a dict keyed by channel: `data[ch]` is an ndarray in V, `rates[ch]` in sps, `lsb_volts[ch]` in V/LSB, and `stats[ch]` has the keys `average std_dev max min p2p fundamental_hz`. |
+| `set_selected_channels(chs)`, `set_busy(bool)` | |
 
-### Sequence (`SequenceTab`)
+#### DMM (`DmmTab(store)`)
 
-- **Left:** a microcode table for µC0–µC52 at 0x3A–0x6E. Its columns are Address, Name and an
-  editable Value (Hex). **Read All** is below the table.
+- **Big readout:** the primary channel, showing its name in the channel colour, the input, a 56 pt
+  value with automatic V/mV/µV units, the code and the filter/rate.
+- **Mini tiles:** one tile per *other* selected channel. Clicking a tile makes that channel the
+  primary one.
+- **Trend:** shows either "Deviation from mean (all selected)" (the default, so channels with mV and
+  V ranges can be compared) or "Absolute (primary only)".
 - **Right:**
-  - **Sequencer**: Start address (hex spin box, 0x3A–0x6E) and **Start Sequence**.
-  - **Current Address**: a read-only hex display, the name of the µC register, and
-    **Read Current Address**.
-  - A short explainer.
+  - **Measurement:** Averaging, Capture, Run continuous, Reset statistics.
+  - **Statistics:** for the primary channel.
 
 | Signal | Args |
 |---|---|
-| `readAllRequested` | `()` |
-| `microcodeWriteRequested` | `(addr: int, value: int)`. Emitted when a Value cell is committed. |
-| `sequenceStartRequested` | `(start_addr: int)` |
-| `currentAddressRequested` | `()` |
-
-| Slot | Args |
-|---|---|
-| `set_microcode_values(values: dict[int, int])` | |
-| `show_current_address(addr: int)` | |
-
-### Registers (`RegistersTab`)
-
-- **Left (splitter):** a Register Map. It has a filter box (name or address), **Read** (the
-  selected register), **Read All**, and a table with columns Address, Name and an editable Value (Hex).
-- **Right:** a Bit Description panel. It shows:
-  - the register name and its address, width and value
-  - a painted **bit strip** (MSB→LSB with field brackets)
-  - a field table with columns Bits, Field, Value and Description
-
-Registers that have no known fields show "description pending (Phase 2)".
-
-| Signal | Args |
-|---|---|
-| `readAllRequested` | `()` |
-| `registerReadRequested` | `(addr: int)` |
-| `registerWriteRequested` | `(addr: int, value: int)`. The value is masked to the register width. |
-
-| Slot | Args |
-|---|---|
-| `set_register_value(addr, value)` | |
-| `set_register_values(values: dict[int, int])` | |
-
-### Scope (`ScopeTab`)
-
-- **Toolbar:** Display unit (Voltage or LSB), Sample rate (SINC4 rates of 4…1920 sps), Samples
-  (256…8192) and **Capture**.
-- **Plot:** a pyqtgraph plot of amplitude against time in seconds.
-- **Right:** a Statistics panel with Average, Std. deviation, Maximum, Minimum, Peak-to-peak,
-  Fundamental, Samples and Sample rate.
-
-Switching Display unit rescales the stored capture locally. It does not trigger a new capture.
-
-| Signal | Args |
-|---|---|
-| `captureRequested` | `(rate_sps: float, n_samples: int)` |
-| `displayUnitChanged` | `("Voltage"\|"LSB")` (informational) |
-
-| Slot | Args |
-|---|---|
-| `show_capture(volts: ndarray, rate_sps, lsb_volts, stats)` | `stats` has the keys `average std_dev max min p2p fundamental_hz`, in volts and Hz |
-| `set_busy(bool)` | Disables Capture and shows "Capturing…". |
-
-### DMM (`DmmTab`)
-
-- **Readout:** a large readout card. It shows "DC VOLTS", the input pair, a 64 pt signed value with
-  auto V/mV/µV units, the raw code and the rate.
-- **Trend:** a strip chart of the last 300 readings.
-- **Right:**
-  - **Measurement**: Rate, Averaging (Off/4/16/64), **Capture** (single reading), **Run continuous**
-    (checkable; it turns into Stop) and Reset statistics.
-  - **Statistics**: Mean, Std, Max, Min and the number of readings. The tab computes these itself
-    from the readings it is fed.
-
-| Signal | Args |
-|---|---|
-| `measureRequested` | `()` |
-| `continuousToggled` | `(on: bool)`. The controller owns the timer or thread. |
-| `rateChanged` | `(sps: float)` |
+| `measureRequested` | `(channels: list[int])`. Read each channel once. |
+| `continuousToggled` | `(on: bool)`. The controller keeps reading `selected()`. |
+| `channelsSelected` | `(channels: list[int])` |
 | `averagingChanged` | `(n: int)` |
 
 | Slot | Args |
 |---|---|
-| `show_reading(volts: float, code: int = 0)` | |
-| `set_input_label(text)` | |
-| `reset_statistics()` | |
+| `show_reading(ch, volts, code=0)` | |
+| `selected() -> list[int]`, `set_selected_channels(chs)`, `reset_statistics()` | |
 
-### Histogram (`HistogramTab`)
+#### Histogram (`HistogramTab(store)`)
 
-- **Toolbar:** **Disable Histogram**, Sample rate, Samples and **Capture**.
-- **Plot:** a bar plot of occurrences against output code. It uses a one-bin-per-LSB integer axis.
-- **Right:** a Noise Analysis panel with Average, Std. dev. (RMS noise), Max, Min, Peak-to-peak
-  noise, Effective resolution, Noise-free resolution and Samples.
+The tab has channel chips (single-select), Disable Histogram, Samples and Capture. Bars are drawn
+in the channel colour, one bin per LSB. The panel title reads "Noise Analysis — n · name".
 
 | Signal | Args |
 |---|---|
-| `captureRequested` | `(rate_sps, n_samples)` |
-| `histogramEnabledChanged` | `(enabled: bool)` |
+| `captureRequested` | `(ch: int, n_samples: int)` |
+| `channelSelected` | `(ch)` |
+| `histogramEnabledChanged` | `(bool)` |
 
 | Slot | Args |
 |---|---|
-| `show_capture(codes: ndarray[int], stats: dict)` | `stats` has the keys `average std_dev max min p2p_noise` (V) and `effective_resolution noise_free_resolution` (bits) |
-| `set_busy(bool)` | |
+| `show_capture(ch, codes, stats)` | `stats` has the keys `average std_dev max min p2p_noise` (V) and `effective_resolution noise_free_resolution` (bits) |
+| `set_selected_channel(ch)`, `set_busy` | |
 
-### FFT (`FftTab`)
+#### FFT (`FftTab(store)`)
 
-- **Toolbar:** Window (Blackman-Harris 4, Hann, Flat top or Rectangular), Sample rate, Samples and
-  **Capture**.
-- **Plot:** magnitude in dBFS against frequency in Hz. The fundamental has a marker and a label.
-- **Right:** a Dynamic Performance panel with Fundamental, Fund. amplitude, THD, SNR, SINAD, SFDR,
-  ENOB and Noise floor.
+The tab has channel chips (single-select), Window, Samples and Capture. The spectrum is drawn in
+the channel colour with a marker on the fundamental. The panel title reads
+"Dynamic Performance — n · name".
 
 | Signal | Args |
 |---|---|
-| `captureRequested` | `(rate_sps, n_samples)` |
-| `windowChanged` | `(name: str)` |
+| `captureRequested` | `(ch: int, n_samples: int)` |
+| `channelSelected` | `(ch)` |
+| `windowChanged` | `(name)` |
 
 | Slot | Args |
 |---|---|
-| `show_spectrum(freqs_hz, mag_dbfs, metrics)` | `metrics` has the keys `fundamental_hz fundamental_dbfs thd_db snr_db sinad_db sfdr_db enob noise_floor_dbfs` |
-| `set_busy(bool)` | |
+| `show_spectrum(ch, freqs_hz, mag_dbfs, metrics)` | `metrics` has the keys `fundamental_hz fundamental_dbfs thd_db snr_db sinad_db sfdr_db enob noise_floor_dbfs` |
+| `set_selected_channel(ch)`, `set_busy` | |
 
-## Style decisions
+### Sequence and Registers
 
-- **Fusion everywhere.** The app uses Fusion with an explicit `QPalette`, so it renders the same on
-  macOS, Windows and Linux. Native styles fight with dark palettes and with group-box styling.
-- **Light and dark palettes** are defined in `theme.py`. View ▸ Theme switches between Follow
-  System (`QStyleHints.colorScheme()`, Qt ≥ 6.5), Light and Dark.
-  - The dark palette makes input fields *lighter* than the group background. That keeps Fusion's
-    checkbox and radio indicators visible.
-  - pyqtgraph plots, LEDs and the bit strip re-colour themselves on `ThemeManager.changed`.
-- **Accent colours.** There is one accent (blue) for primary actions (Capture, Convert, Start…) and for traces. A
-  second colour (orange) is used for markers and highlights. Green, amber and red appear only on
-  status LEDs and log tags.
-- **Monospace numbers.** All numeric outputs use the system fixed-width font. That covers hex
-  fields, statistics, the log and readouts, so digits don't jitter. Values are formatted with
-  engineering prefixes (`fmt_si`: 900.480 nV, 2.862 Hz).
-- **Group boxes and spacing.** Every group box has a title. Spacing is consistent: 12 px outer
-  margins, 8–10 px between groups and 6 px between form rows. Form labels are right-aligned, and
-  non-fixed fields stretch.
-- **Tooltips** name the register or field a control maps to, for example "(FILTER.LINEF)".
-- **Scroll safety.** The ADC Config tab is wrapped in a `QScrollArea`, so small laptop screens don't
-  clip it. Every other tab is built around a table or plot that stretches.
+These tabs are unchanged from rev 1:
+
+- `SequenceTab` signals: `readAllRequested`, `microcodeWriteRequested`, `sequenceStartRequested`,
+  `currentAddressRequested`.
+- `RegistersTab` signals: `readAllRequested`, `registerReadRequested`, `registerWriteRequested`.
+
+## Rationale
+
+- **Selector + editor rather than 8 copies of the controls.** One table shows every channel at a
+  glance (input, range, rate, last value). One editor holds the full control set, the same controls
+  as rev 1, so the screen stays as dense as the original EV-kit software.
+- **The PER-CHANNEL / GLOBAL split is explicit.** The two halves are separated by badges and their
+  position on the page, so a user can see which settings follow the channel and which affect the
+  whole device. Calibration sits under GLOBAL because it is a device action, but it uses the
+  selected channel's configuration (the `ch` argument).
+- **The rate lives in the channel config.** This avoids two sources of truth (the capture-bar rate
+  against the channel rate). Captures always run with exactly what the channel table shows.
+- **Results are keyed by channel.** That lets Scope and DMM show several channels without changing
+  the API, and Histogram and FFT pass `ch` explicitly so their panel titles can never go stale.
+- **The style is unchanged:** Fusion with light/dark palettes, monospace numbers, group boxes and
+  one accent colour. Channel colours are the only new colours.
 
 ## Open questions
 
-1. **Register map details.** Register widths are placeholders: DATA, THRESH, SYS_*, SELF_*, STATUS,
-   STATUS_IE and PART_ID are assumed to be 24-bit, and µC registers 16-bit. Option encodings for the
-   IDAC currents, VBIAS modes, burn-out, GPIO modes and the FIR rate tables are also placeholders. All
-   of these need to come from Phase 2 `regmap.yaml` and the datasheet.
-2. **SINC4 rate list.** The mockup shows actual rates, with 59.8 for nominal 60. Should the combo
-   show nominal and actual rates side by side (for example "60 Hz (59.8 sps)") once the real table
-   is known? Do the rates differ between single-cycle and continuous mode? If they do, the rate
-   combo must also depend on `conv_mode`.
-3. **Filter naming.** The original software shows "60Hz SINC4" as one filter choice. Here it is
-   LINEF = SINC4 plus a rate, with a summary label. Should the EV-kit-style combined label be kept
-   as the only selector?
-4. **Wait time formula.** The mock uses `(WAIT+1)·(WAIT_EXT+1)·256 / 2.4576 MHz` as a placeholder.
-   The backend should own the real formula.
-5. **Write policy.** Should a change be written immediately (as the mockup assumes, with "Changes
-   are written immediately"), or staged until an "Apply" step? Should **Read All** on the ADC
-   Config tab also refresh the Registers tab?
-6. **Config file format.** File ▸ Save/Load currently dumps `AdcConfigTab.config()` as JSON on the
-   GUI side. Should it be a register-image file owned by the backend instead, for compatibility with
-   the Windows `.cfg` files?
-7. **Capture threading.** The controller should run captures in a worker (`QThread`) and call
-   `set_busy(True/False)` around them. Should a progress bar or cancel button be added for 8192-sample
-   captures at low rates? 8192 samples at 4 sps takes about 34 minutes.
-8. **Display unit for thresholds.** When the unit changes, should the backend convert and push back
-   with `set_thresholds`, or should the GUI convert locally using the LSB size? The mockup only
-   emits the change.
-9. **Reference voltage default.** The power-on REFSEL and Vref of the EV kit, and whether Vref can
-   be measured, are still to be confirmed. The mockup assumes REF0P/REF0N at 2.5 V.
-10. **Multiple channels on Scope/DMM.** Should the scope overlay DATA0–7 when the sequencer is
-    running? That would need `show_capture` to take a dict of channel → array.
+1. Excitation (IDAC, VBIAS, burn-out) is global in this draft. A ratiometric RTD channel and a
+   bridge channel may want different IDAC routing. Should IDAC/VBIAS become per-channel keys that
+   the backend applies together with the MUX?
+2. Thresholds (LTHRESH/UTHRESH) live on the Other tab and are keyed by channel. Should they move
+   into the channel config, and so into the config file?
+3. Multi-channel Scope captures alternate between channels (in the sequencer or host-driven). Each
+   channel's effective rate is then lower than its configured `rate`, and settling time adds to it.
+   The backend should report the *effective* rate per channel in `rates[ch]`. Is
+   `n_samples` per channel or the total? The SRAM limit is 8192 samples in total.
+4. Should **Convert All Enabled** and multi-channel captures be generated as sequencer microcode, so
+   the Sequence tab would show that microcode? Or should they be host-driven loops?
+5. Disabling a channel while it is selected in a measurement tab silently moves the selection to the
+   first enabled channel. Should the user be warned instead?
+6. When rev-1 placeholders become real data: register widths, option encodings and FIR rate tables
+   still come from the Phase 2 `regmap.yaml`. The SINC4 rate list shows actual rates (59.8 sps for
+   the nominal 60). Does it depend on the conversion mode?
+7. The wait-time formula is a placeholder, and the backend should own it. The write policy is that
+   changes are written immediately, since a channel config is only applied at conversion time.
+   Capture threading uses a worker plus `set_busy`, and could add progress or cancel for long captures.
+8. Config compatibility: should we also import or export the Windows software's `.cfg` files?
+   Those files have no channel concept.

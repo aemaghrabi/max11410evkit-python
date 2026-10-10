@@ -17,11 +17,17 @@ What is modelled (from main.c):
 * 0x43 replies with N raw bytes and no status; N=0 gives no reply;
 * 0x45, 0x46 and unknown commands never reply; 0x51 failure still sends N+1 bytes.
 
-The toy ADC: register widths 0x00-0x10 = 1 B, 0x11-0x39 = 3 B, 0x3A-0x6F = 2 B (assumed);
-SPI first byte bit 7 = read; a "read" without the flag is a write of the dummy 0x00 bytes
-(as on the real part); CONV_START (0x01) bits[2:0] = 1 -> continuous, else single;
-CAL_START (0x03) sets CAL_READY; STATUS (0x38) bit0 CONV_READY and bit2 CAL_READY clear on
-read; DATA0 (0x30) sample = 0x800000 + (AINP << 16) + index with AINP = MUX_CTRL0(0x0B)>>4.
+The toy ADC (datasheet behaviour): register widths, access and reset values come from
+device/regmap.yaml; SPI first byte bit 7 = R/WB (1 = read); a "read" without the flag is a
+write of the dummy 0x00 bytes (as on the real part). CONV_START: DEST[6:4] selects DATA0-7,
+CONV_TYPE[1:0] 0 = single, 1-3 = continuous/duty-cycled; writing it clears CONV_RDY. Start
+commands wake the part (PD -> 0); PD = RESET restores POR values and leaves standby.
+CAL_START sets CAL_RDY. Reading STATUS clears every flag except DATA_RDY, which clears when the
+unread DATA registers are read. INTB = STATUS & STATUS_IE (reset: CONV_RDY only).
+Sample = 0x800000 + (AINP << 16) + index (AINP 11-15 = unconnected count as 0), unless
+``adc.inputs`` gives a voltage for AINP: then the code follows MUX_CTRL0, CTRL (REF_SEL, U_BN,
+FORMAT: offset binary / two's complement), PGA (analog gain, or digital gain <= 4x on the
+buffered/bypass paths) and ``adc.refs`` / ``adc.avdd`` (datasheet Table 8 transfer function).
 """
 
 from __future__ import annotations
@@ -40,38 +46,88 @@ PART_ID = 0x000F02
 PROJECT = b"MAX11410EVK"
 FW_VERSION = (1, 1)
 
-REG_CONV_START, REG_CAL_START, REG_MUX_CTRL0 = 0x01, 0x03, 0x0B
-REG_PART_ID, REG_DATA0, REG_STATUS = 0x11, 0x30, 0x38
-CONV_READY, CAL_READY = 0x01, 0x04
+REG_PD, REG_CONV_START, REG_SEQ_START, REG_CAL_START = 0x00, 0x01, 0x02, 0x03
+REG_CTRL, REG_MUX_CTRL0, REG_PGA, REG_WAIT_START = 0x09, 0x0B, 0x0E, 0x10
+REG_PART_ID, REG_DATA0, REG_STATUS, REG_STATUS_IE = 0x11, 0x30, 0x38, 0x39
+CONV_RDY, CAL_RDY, DATA_RDY = 0x01, 0x04, 0x10
+CONV_READY, CAL_READY = CONV_RDY, CAL_RDY  # Phase 2 names
 
 
 def reg_width(reg: int) -> int:
-    if reg <= 0x10:
-        return 1
-    if reg <= 0x39:
-        return 3
-    return 2
+    from max11410_evkit.device.regmap import load_regmap
+
+    spec = load_regmap()
+    return spec[reg].width if reg in spec else 1
 
 
 class FakeAdc:
-    """Minimal MAX11410 register model."""
+    """Minimal MAX11410 register model (datasheet behaviour where it matters to the host)."""
 
     def __init__(self, conversion_time_s: float = 0.0) -> None:
+        from max11410_evkit.device.regmap import load_regmap
+
+        self.spec = load_regmap()
         self.conversion_time_s = conversion_time_s
         self.regs = [0] * 0x80
+        self._readonly: set[int] = set()
+        for r in self.spec:
+            if r.reset is not None:
+                self.regs[r.addr] = r.reset
+            if not r.writable:
+                self._readonly.add(r.addr)
         self.regs[REG_PART_ID] = PART_ID
         self.continuous = False
         self.pending = False  # a single conversion is in progress
+        self.dest = 0  # CONV_START.DEST of the running conversion
+        self.unread: set[int] = set()  # DATA registers holding unread results (DATA_RDY)
         self.started_at = 0.0
         self.index = 0
         self.spi_log: list[tuple[int, bytes, bytes]] = []  # (first byte, MOSI data, MISO data)
+        # Optional analog model: volts on AIN0..AIN9 (unset inputs -> legacy test pattern).
+        self.inputs: dict[int, float] = {}
+        self.avdd = 3.3
+        self.refs = {0: 2.5, 1: 2.5, 2: 2.5}  # REFnP - REFnN in volts
+        self.cal_log: list[tuple[int, int]] = []  # (CAL_START value, PGA register at the time)
+
+    def _vref(self) -> float:
+        refsel = self.regs[REG_CTRL] & 0x07
+        if refsel in (3, 7):
+            return self.avdd
+        return self.refs.get(refsel % 4, 2.5)
+
+    def _analog_code(self) -> int | None:
+        mux = self.regs[REG_MUX_CTRL0]
+        ainp, ainn = mux >> 4, mux & 0x0F
+        if ainp not in self.inputs and ainp != 10:
+            return None
+        vp = self.avdd if ainp == 10 else self.inputs.get(ainp, 0.0)
+        vn = 0.0 if ainn >= 10 else self.inputs.get(ainn, 0.0)
+        pga = self.regs[REG_PGA]
+        gain = 1 << (pga & 0x07)
+        if (pga >> 4) & 0x03 != 2:  # buffered/bypass: digital gain saturating at 4x
+            gain = min(gain, 4)
+        vref = self._vref()
+        ctrl = self.regs[REG_CTRL]
+        if ctrl & 0x40:  # U_BN = 1: unipolar, straight binary
+            code = round((vp - vn) * ((1 << 24) - 1) * gain / vref)
+            return min(max(code, 0), (1 << 24) - 1)
+        code = round((vp - vn) * ((1 << 23) - 1) * gain / vref)
+        code = min(max(code, -(1 << 23)), (1 << 23) - 1)
+        if ctrl & 0x20:  # FORMAT = 1: offset binary
+            return code + (1 << 23)
+        return code & 0xFFFFFF  # two's complement
 
     # conversions -------------------------------------------------------
     def _produce(self) -> None:
-        ainp = self.regs[REG_MUX_CTRL0] >> 4
-        self.regs[REG_DATA0] = (0x800000 + (ainp << 16) + self.index) & 0xFFFFFF
+        code = self._analog_code()
+        if code is None:
+            ainp = self.regs[REG_MUX_CTRL0] >> 4
+            ainp = ainp if ainp <= 10 else 0  # 11..15 = unconnected
+            code = (0x800000 + (ainp << 16) + self.index) & 0xFFFFFF
+        self.regs[REG_DATA0 + self.dest] = code
+        self.unread.add(self.dest)
         self.index += 1
-        self.regs[REG_STATUS] |= CONV_READY
+        self.regs[REG_STATUS] |= CONV_RDY | DATA_RDY
 
     def _settle(self) -> None:
         """Complete any conversion whose time has elapsed (used on STATUS polling)."""
@@ -98,20 +154,30 @@ class FakeAdc:
 
     @property
     def intb(self) -> int:
-        return 0 if self.regs[REG_STATUS] & CONV_READY else 1
+        """INTB is low while an enabled STATUS bit is set (STATUS & STATUS_IE)."""
+        return 0 if self.regs[REG_STATUS] & self.regs[REG_STATUS_IE] else 1
 
     # SPI -----------------------------------------------------------------
     def _write(self, reg: int, data: bytes) -> None:
         w = reg_width(reg)
-        if reg == REG_PART_ID or not data:
+        if reg in self._readonly or not data:
             return
         self.regs[reg] = int.from_bytes(data[:w].ljust(w, b"\x00"), "big")
-        if reg == REG_CONV_START:
-            self.continuous = (self.regs[reg] & 0x07) == 1
+        if reg in (REG_CONV_START, REG_CAL_START, REG_SEQ_START, REG_WAIT_START):
+            self.regs[REG_PD] = 0  # an asynchronous start command wakes the part
+        if reg == REG_PD and self.regs[reg] & 0x03 == 3:  # RESET: POR state, then standby
+            self.__init__(self.conversion_time_s)
+            self.regs[REG_PD] = 0x01
+        elif reg == REG_CONV_START:
+            v = self.regs[reg]
+            self.dest = (v >> 4) & 0x07
+            self.continuous = (v & 0x03) != 0  # continuous or duty-cycled
             self.pending = not self.continuous
+            self.regs[REG_STATUS] &= ~CONV_RDY
             self.started_at = time.monotonic()
         elif reg == REG_CAL_START:
-            self.regs[REG_STATUS] |= CAL_READY
+            self.cal_log.append((self.regs[reg], self.regs[REG_PGA]))
+            self.regs[REG_STATUS] |= CAL_RDY
 
     def _read(self, reg: int, n: int) -> bytes:
         w = reg_width(reg)
@@ -119,7 +185,11 @@ class FakeAdc:
             self._settle()
         v = self.regs[reg]
         if reg == REG_STATUS:
-            self.regs[REG_STATUS] &= ~(CONV_READY | CAL_READY)
+            self.regs[REG_STATUS] &= DATA_RDY  # everything but DATA_RDY clears on read
+        elif REG_DATA0 <= reg <= REG_DATA0 + 7:
+            self.unread.discard(reg - REG_DATA0)
+            if not self.unread:
+                self.regs[REG_STATUS] &= ~DATA_RDY
         return v.to_bytes(w, "big")[:n].ljust(n, b"\x00")
 
     def transfer_write(self, first: int, data: bytes) -> None:
