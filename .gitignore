@@ -1,0 +1,70 @@
+# --- Python bytecode / extensions ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+# --- Packaging / build ---
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+MANIFEST
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Test / lint / type-check caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# --- Qt / GUI tooling ---
+*.qmlc
+*.jsc
+*_ui.py.bak
+
+# --- Local captures and saved EV kit configs (keep out of the repo) ---
+captures/
+*.csv
+max11410_config*.json
+*.log
+
+# --- Generated screenshots (regenerate with docs/gui/render_screenshots.py) ---
+screenshots/
+
+# --- Editors / IDEs ---
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS cruft ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Secrets / local env ---
+.env
+.env.*

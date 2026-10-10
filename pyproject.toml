@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "max11410-evkit"
+version = "0.1.0"
+description = "Cross-platform host software for the Analog Devices/Maxim MAX11410EVKIT (24-bit ADC) over USB HID"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Ahmed Elmaghrabi" }]
+dependencies = ["hidapi>=0.14"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Scientific/Engineering :: Interface Engine/Protocol Translator",
+]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.6", "pyqtgraph>=0.13", "numpy>=1.26"]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+max11410-evkit = "max11410_evkit.cli:main"
+
+[project.gui-scripts]
+max11410-evkit-gui = "max11410_evkit.gui.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
