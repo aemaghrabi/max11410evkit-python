@@ -7,10 +7,10 @@ name = "max11410-evkit"
 version = "0.1.0"
 description = "Cross-platform host software for the Analog Devices/Maxim MAX11410EVKIT (24-bit ADC) over USB HID"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Ahmed Elmaghrabi" }]
-dependencies = ["hidapi>=0.14"]
+dependencies = ["hidapi>=0.14", "pyyaml>=6"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: MacOS",
@@ -32,6 +32,9 @@ max11410-evkit-gui = "max11410_evkit.gui.app:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"max11410_evkit.device" = ["regmap.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
@@ -39,7 +42,7 @@ addopts = "-ra"
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
