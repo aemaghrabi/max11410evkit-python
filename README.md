@@ -199,6 +199,25 @@ res = apply_config(adc, DeviceConfig.load("my.json"), with_cal=False, verify=Tru
 print(res.written, res.mismatches)
 ```
 
+## Desktop app (Phase 5: shell)
+
+```sh
+pip install -e ".[dev,gui]"
+max11410-evkit-gui                 # real EV kit over USB (shows Disconnected until one is attached)
+max11410-evkit-gui --offline       # simulated EV kit, no hardware
+max11410-evkit-gui --mock          # GUI mockup on fabricated data (until the project is finished)
+max11410-evkit-gui --theme dark    # light | dark | system
+```
+
+- Connecting **only reads** the board: firmware, PART_ID, then every register (Read All).
+  Channel 0 shows the board's current MUX_CTRL0/CTRL/PGA/FILTER setup; channels 1-7 are
+  disabled defaults. Nothing is written until you choose to.
+- The app reconnects automatically when the kit is unplugged and plugged back in. With several
+  kits attached it asks which one to use. File ▸ Connect… / Disconnect / Use Simulated Board.
+- File ▸ Save/Load ADC Config use the Phase 4 file format. Load asks for confirmation first
+  (optionally restoring the calibration registers, like `--with-cal`).
+- The tabs are greyed out until Phases 6 and 7 wire them; they still show what Read All read.
+
 ## Library use (board level)
 
 ```python
