@@ -218,9 +218,9 @@ def test_access_checks(regs):
 
 
 def test_sequencer_width_used_for_spi(regs, fake):
-    regs.write("UC5", 0xBEEF)
-    assert fake.received[-1][:5] == bytes([0x40, 0x3F, 2, 0xBE, 0xEF])
-    assert regs.read("UC5") == 0xBEEF
+    regs.write("UC5", 0x0EEF)
+    assert fake.received[-1][:5] == bytes([0x40, 0x3F, 2, 0x0E, 0xEF])
+    assert regs.read("UC5") == 0x0EEF
 
 
 def test_read_all_dump_diff_write_all(regs, fake):

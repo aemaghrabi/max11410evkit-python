@@ -154,6 +154,51 @@ with connect() as board:
     print(fft.metrics.snr_db, fft.metrics.enob)
 ```
 
+## Config files (Phase 4)
+
+```sh
+max11410-evkit save-config my.json                     # registers + 8 channel configs
+max11410-evkit save-config my.json --ch 1 --ainp 0 --ainn 1 --gain 128   # also set slot 1
+max11410-evkit load-config my.json                     # write to the board, read back, verify
+max11410-evkit load-config my.json --with-cal          # also restore the calibration registers
+max11410-evkit diff-config my.json                     # registers where the board differs
+max11410-evkit capture --config my.json --ch 1 -n 1000 # channel 1 from the file
+```
+
+One JSON file (`"format": "max11410-evkit-config"`, version 1) holds two sections:
+
+* **`registers`**: every readable, writable, non-trigger, non-volatile register. That is
+  0x00-0x39 plus the sequencer µC0-µC52, 97 registers, as hex strings. Left out: CONV_START,
+  SEQ_START, CAL_START and WAIT_START (writing them starts an action), DATA0-7, STATUS, PART_ID
+  and UCADDR.
+* **`channels`**: the 8 host-side channel configs (`ChannelConfig.to_dict()`). A missing slot
+  loads as the default, disabled. Global settings (power, IDAC, VBIAS, ...) live only in
+  `registers`.
+
+Rules:
+
+* A µC entry that targets a 24-bit register or a µC address is rejected when the file is loaded,
+  because the chip would store 0x0000 (datasheet "Sequencer Notes").
+* `load-config` writes the registers in address order, with **PD last**. It then reads every
+  written register back and lists any that differ (exit code 1).
+* The **calibration registers** (SYS_OFF_A/B, SYS_GAIN_A/B, SELF_OFF, SELF_GAIN_1..128) are
+  always saved. `load-config` and `diff-config` use them only with `--with-cal`.
+* `save-config` reads the registers from the board without changing anything on it. Each CLI run
+  starts with default channels, so if the file exists, its channels are kept. Use `--ch N` with
+  the channel options to set slot N, which is also enabled. A file that is not a config is never
+  overwritten.
+* `read`/`capture`/`hist`/`fft --config FILE` take the channels from the file; explicit options
+  override them. They do not write the file's registers; use `load-config` for that.
+
+```python
+from max11410_evkit.config import DeviceConfig, apply_config, diff_config, read_config
+
+cfg = read_config(adc)  # adc = MAX11410(board)
+cfg.save("my.json")
+res = apply_config(adc, DeviceConfig.load("my.json"), with_cal=False, verify=True)
+print(res.written, res.mismatches)
+```
+
 ## Library use (board level)
 
 ```python

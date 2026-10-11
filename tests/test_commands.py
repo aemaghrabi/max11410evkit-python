@@ -64,9 +64,9 @@ def test_register_roundtrip(board, reg, value):
 
 
 def test_register_bytes_and_explicit_width(board, fake):
-    board.write_register(0x3A, b"\x12\x34", width=2)  # sequencer register: width required
-    assert board.read_register(0x3A, 2) == 0x1234
-    assert board.read_register_bytes(0x3A, 2) == b"\x12\x34"
+    board.write_register(0x3A, b"\x0b\x34", width=2)  # sequencer register: width required
+    assert board.read_register(0x3A, 2) == 0x0B34
+    assert board.read_register_bytes(0x3A, 2) == b"\x0b\x34"
 
 
 def test_register_validation(board):

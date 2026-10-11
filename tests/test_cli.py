@@ -17,8 +17,10 @@ def test_peek_poke_fake(capsys):
     assert "0x11 = 0x000F02" in capsys.readouterr().out
     assert main(["--fake", "poke", "0x0B", "2A"]) == 0
     assert "readback 0x2A" in capsys.readouterr().out
-    assert main(["--fake", "poke", "3A", "1234", "2"]) == 0
-    assert "readback 0x1234" in capsys.readouterr().out
+    assert main(["--fake", "poke", "3A", "0B01", "2"]) == 0
+    assert "readback 0x0B01" in capsys.readouterr().out
+    assert main(["--fake", "poke", "3A", "1234", "2"]) == 0  # targets SYSC_SEL (24-bit)
+    assert "readback 0x0000" in capsys.readouterr().out
 
 
 def test_peek_unknown_width_needs_explicit_width():
