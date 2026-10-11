@@ -124,7 +124,7 @@ All four accept the same channel options as `read` (`--ch --ainp --ainn --refsel
 --linef --gain --path --bipolar`). Ctrl-C cancels after the current block and discards all
 the data of that capture.
 
-* **Blocks and gaps.** The firmware captures into the board SRAM (32 KB assumed, so at most
+* **Blocks and gaps.** The firmware captures into the board SRAM (32 KB, measured, so at most
   10,922 samples per block). Longer captures are split into blocks automatically. The ADC is
   idle while a block is read back over USB, so there is a time gap before every new block (the
   `block` column of the CSV). An FFT therefore always uses one gap-free block: a power of 2, at
@@ -194,4 +194,5 @@ a toy MAX11410 register model.
 * SPI passthrough sends the address byte unchanged: reads need `reg | 0x80`. A "read" without
   the flag is a write of zeros to the register.
 * Commands `0x45`/`0x46` never reply and are not exposed.
-* Board SRAM is assumed to be 32 KB (`EVKIT_SRAM_BYTES`) until the BOM confirms the part.
+* Board SRAM is 32 KB (`EVKIT_SRAM_BYTES`), measured with `scripts/sram_size_check.py`: the
+  addresses wrap at 0x8000.

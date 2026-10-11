@@ -47,7 +47,7 @@ MAX_SPI_BYTES = 40  # firmware spi_buf_size
 MAX_SRAM_CHUNK = 63  # 0x43 reply is [N][N raw bytes]
 MAX_ECHO_BYTES = MAX_PAYLOAD - 2  # [N][0x01][n][bytes...]
 MAX_SAMPLES = 0xFFFF  # 0x42 sample count is 16-bit
-EVKIT_SRAM_BYTES = 32768  # SRAM part not named in the sources; 23K256-style 32 KB assumed
+EVKIT_SRAM_BYTES = 32768  # measured 2026-10-11 (scripts/sram_size_check.py): wraps at 0x8000
 SPI_BASE_CLOCK_HZ = 6_000_000  # fSCLK = 6 MHz / (div + 1)
 PROJECT_NAME = "MAX11410EVK"
 

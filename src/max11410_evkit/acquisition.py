@@ -1,7 +1,7 @@
 """Captures of any length, split into blocks that fit the EVKIT's capture SRAM.
 
-The firmware's 0x42 command stores samples in the board SRAM (32 KB assumed, see
-``EVKIT_SRAM_BYTES``), so one block holds at most ``sram_bytes // 3`` samples (10,922).
+The firmware's 0x42 command stores samples in the board SRAM (32 KB, measured on the EVKIT;
+see ``EVKIT_SRAM_BYTES``), so one block holds at most ``sram_bytes // 3`` samples (10,922).
 :func:`acquire` hides that limit: it runs as many blocks as needed and joins them.
 
 Between blocks the SRAM is read back over USB while the ADC is idle, so a multi-block
