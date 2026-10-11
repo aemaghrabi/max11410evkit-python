@@ -32,7 +32,7 @@ DEMO_CHANNELS = {
     2: {
         "name": "PT100 RTD", "enabled": True, "ainp": "AIN4", "ainn": "AIN5",
         "sig_path": "PGA", "pga_gain": 16, "refsel": "REF2P / REF2N", "vref": 1.6,
-        "unipolar": True, "filter": "FIR 50/60 Hz", "rate": 4.4, "settling_ms": 20.0,
+        "unipolar": True, "filter": "FIR 50/60 Hz", "rate": 4.2, "settling_ms": 20.0,
     },
     3: {
         "name": "Thermocouple K", "enabled": True, "ainp": "AIN6", "ainn": "AIN7",

@@ -139,7 +139,8 @@ def register_by_addr(addr: int) -> Register | None:
 
 
 # ---------------------------------------------------------------- option tables
-MUX_INPUTS = [f"AIN{i}" for i in range(10)] + ["AVDD", "GND"]
+# "NC" = unconnected (MUX_CTRL0 codes 11-15; the reset value 0xFF reads as NC/NC).
+MUX_INPUTS = [f"AIN{i}" for i in range(10)] + ["AVDD", "GND", "NC"]
 SIG_PATHS = ["Buffered", "Bypass", "PGA"]
 PGA_GAINS = [1, 2, 4, 8, 16, 32, 64, 128]
 FILTERS = ["FIR 50/60 Hz", "FIR 50 Hz", "FIR 60 Hz", "SINC4"]  # LINEF 0..3
@@ -189,12 +190,13 @@ SAMPLE_COUNTS = [256, 512, 1024, 2048, 4096, 8192]  # 8192 = max with 32 KB boar
 
 # Continuous-mode output rates (sps) per filter, indexed by RATE code.
 # SINC4 values are from the EV kit brief (60 sps nominal reads back as 59.8 sps);
-# FIR values are PLACEHOLDERS until Phase 2.
+# FIR values are the continuous-mode columns of datasheet Tables 9a-9c (Phase 5).
+# RATE codes past the end of a list repeat the last entry.
 RATES: dict[str, list[float]] = {
     "SINC4": [4.0, 10.0, 20.0, 40.0, 59.8, 120.0, 240.0, 480.0, 960.0, 1920.0],
-    "FIR 50/60 Hz": [1.1, 2.2, 4.4, 8.8, 17.6, 35.2],
-    "FIR 50 Hz": [1.3, 2.7, 5.3, 10.7, 21.3, 42.6],
-    "FIR 60 Hz": [1.3, 2.7, 5.3, 10.7, 21.3, 42.6],
+    "FIR 50/60 Hz": [1.1, 2.1, 4.2, 8.4, 16.8],
+    "FIR 50 Hz": [1.3, 2.7, 5.3, 10.7, 21.3, 40.0],
+    "FIR 60 Hz": [1.3, 2.7, 5.3, 10.7, 21.3, 40.0],
 }
 CAPTURE_RATES = RATES["SINC4"]
 

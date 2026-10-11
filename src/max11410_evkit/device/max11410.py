@@ -194,6 +194,58 @@ class ChannelConfig:
 
 EVKIT_DEFAULT_CHANNEL = ChannelConfig()
 
+#: Registers that hold the per-channel setup (what :meth:`MAX11410.apply_channel` writes).
+CHANNEL_REGISTERS = ("MUX_CTRL0", "CTRL", "PGA", "FILTER")
+
+
+def channel_from_registers(
+    values: dict[str, int], base: ChannelConfig | None = None
+) -> tuple[ChannelConfig, list[str]]:
+    """Decode the board's current channel setup from MUX_CTRL0, CTRL, PGA and FILTER.
+
+    The inverse of :meth:`MAX11410.apply_channel`, from register values only (no SPI access).
+    Settings that live in no register (name, enabled, reference voltage, settling time) are
+    taken from ``base`` (default: the EVKIT default channel). Returns the config and a list of
+    notes about values that had to be mapped (unconnected-input codes 11-14, the reserved
+    SIG_PATH code, digital gain above 4).
+    """
+    base = base or EVKIT_DEFAULT_CHANNEL
+    notes: list[str] = []
+    mux = values["MUX_CTRL0"] & 0xFF
+    ctrl = values["CTRL"] & 0xFF
+    pga = values["PGA"] & 0xFF
+    filt = values["FILTER"] & 0xFF
+
+    def _input(code: int, what: str) -> int:
+        if code <= 10 or code == INPUT_NC:
+            return code
+        notes.append(f"{what} code {code} (unconnected) shown as {INPUT_NC}")
+        return INPUT_NC
+
+    sig = (pga >> 4) & 0x3
+    paths = {v: k for k, v in SIG_PATHS.items()}
+    if sig not in paths:
+        notes.append(f"PGA.SIG_PATH = {sig} is reserved; shown as buffered")
+    path = paths.get(sig, "buffered")
+    gain = GAINS[pga & 0x7]
+    if path != "pga" and gain > DIGITAL_GAIN_MAX:
+        notes.append(f"digital gain x{gain} on the {path} path saturates at x{DIGITAL_GAIN_MAX}")
+        gain = DIGITAL_GAIN_MAX
+    cfg = replace(
+        base,
+        ainp=_input(mux >> 4, "AINP_SEL"),
+        ainn=_input(mux & 0xF, "AINN_SEL"),
+        refsel=ctrl & 0x7,
+        vrefn_buf=bool(ctrl & 0x08),
+        vrefp_buf=bool(ctrl & 0x10),
+        bipolar=not (ctrl & 0x40),
+        path=path,  # type: ignore[arg-type]
+        gain=gain,
+        linef=LINEF[(filt >> 4) & 0x3],  # type: ignore[arg-type]
+        rate=filt & 0xF,
+    )
+    return cfg.validate(), notes
+
 
 def _signed24(raw: int) -> int:
     return raw - FULL_SCALE if raw & MID_SCALE else raw
@@ -336,6 +388,17 @@ class MAX11410:
             time.sleep(cfg.settling_us / 1e6)
         self.active_channel = index if index >= 0 else None
         return cfg
+
+    def read_channel(
+        self, index: int = 0, *, base: ChannelConfig | None = None
+    ) -> tuple[ChannelConfig, list[str]]:
+        """Read MUX_CTRL0/CTRL/PGA/FILTER and decode them (reads only, nothing is written).
+
+        The result is *not* stored in ``channels``; call :meth:`set_channel` for that.
+        """
+        self._check_index(index)
+        values = {name: self.regs.read(name) for name in CHANNEL_REGISTERS}
+        return channel_from_registers(values, base or self.channels[index])
 
     # ------------------------------------------------------------------ conversions
     @staticmethod

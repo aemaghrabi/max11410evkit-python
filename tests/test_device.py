@@ -377,3 +377,39 @@ def test_init_writes_pd_and_format(board, fake):
     d.init()
     assert fake.adc.regs[0x00] == 0x00 and fake.adc.regs[0x09] == 0x21
     assert d.regs.STATUS_IE.CONV_RDY_IE == 1  # default: data-ready drives INTB
+
+
+# --------------------------------------------------------------- Phase 5: decode channel
+CHANNEL_CASES = [
+    ChannelConfig(),
+    ChannelConfig(ainp=4, ainn=5, path="pga", gain=128, refsel=2, vrefp_buf=True, bipolar=True,
+                  linef="FIR50", rate=3),
+    ChannelConfig(ainp=10, ainn=0, path="bypass", gain=4, refsel=7, vrefn_buf=True,
+                  linef="FIR5060", rate=0),
+    ChannelConfig(ainp=15, ainn=15, refsel=3, linef="FIR60", rate=15),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("cfg", CHANNEL_CASES)
+def test_read_channel_round_trips_apply_channel(dev, fake, cfg):
+    from max11410_evkit.device.max11410 import CHANNEL_REGISTERS
+
+    dev.apply_channel(cfg)
+    n_writes = len(fake.adc.spi_log)
+    back, notes = dev.read_channel(0, base=replace(cfg, name="kept", vref_volts=1.25))
+    assert notes == []
+    assert all(first & 0x80 for first, *_ in fake.adc.spi_log[n_writes:])  # reads only
+    assert len(fake.adc.spi_log) - n_writes == len(CHANNEL_REGISTERS)
+    assert back == replace(cfg, name="kept", vref_volts=1.25)
+
+
+def test_channel_from_registers_maps_odd_codes():
+    from max11410_evkit.device.max11410 import channel_from_registers
+
+    cfg, notes = channel_from_registers(
+        {"MUX_CTRL0": 0xBC, "CTRL": 0x00, "PGA": 0x37, "FILTER": 0x30}
+    )
+    assert (cfg.ainp, cfg.ainn) == (15, 15)  # 11 / 12 = unconnected
+    assert cfg.path == "buffered" and cfg.gain == 4  # reserved SIG_PATH 3, gain capped
+    assert cfg.bipolar  # U_BN = 0
+    assert len(notes) == 4

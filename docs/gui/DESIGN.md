@@ -11,8 +11,12 @@ four enabled channels:
 | 2 | PT100 RTD | AIN4 – AIN5 | PGA ×16 | REF2, with IDAC |
 | 3 | Thermocouple K | AIN6 – AIN7 | PGA ×32 | REF0 |
 
+> **Phase 5 (2026-10-12):** the real app now runs on `DeviceController` + `DeviceWorker`
+> (`docs/plan/p5-gui-shell.md`). The mockup described here is started with `--mock`; in real
+> and `--offline` modes every tab is greyed out until Phases 6/7 wire it.
+
 ```bash
-PYTHONPATH=src python -m max11410_evkit.gui            # --theme light|dark|system, --no-mock
+PYTHONPATH=src python -m max11410_evkit.gui --mock     # --theme light|dark|system; or --offline / (none) = USB
 QT_QPA_PLATFORM=offscreen PYTHONPATH=src python docs/gui/render_screenshots.py   # PNGs
 ```
 
@@ -290,26 +294,19 @@ These tabs are unchanged from rev 1:
 - **The style is unchanged:** Fusion with light/dark palettes, monospace numbers, group boxes and
   one accent colour. Channel colours are the only new colours.
 
-## Open questions
+## Decisions for Phase 6 (Ahmed, 2026-10-12 00:41)
 
-1. Excitation (IDAC, VBIAS, burn-out) is global in this draft. A ratiometric RTD channel and a
-   bridge channel may want different IDAC routing. Should IDAC/VBIAS become per-channel keys that
-   the backend applies together with the MUX?
-2. Thresholds (LTHRESH/UTHRESH) live on the Other tab and are keyed by channel. Should they move
-   into the channel config, and so into the config file?
-3. Multi-channel Scope captures alternate between channels (in the sequencer or host-driven). Each
-   channel's effective rate is then lower than its configured `rate`, and settling time adds to it.
-   The backend should report the *effective* rate per channel in `rates[ch]`. Is
-   `n_samples` per channel or the total? The SRAM limit is 8192 samples in total.
-4. Should **Convert All Enabled** and multi-channel captures be generated as sequencer microcode, so
-   the Sequence tab would show that microcode? Or should they be host-driven loops?
-5. Disabling a channel while it is selected in a measurement tab silently moves the selection to the
-   first enabled channel. Should the user be warned instead?
-6. When rev-1 placeholders become real data: register widths, option encodings and FIR rate tables
-   still come from the Phase 2 `regmap.yaml`. The SINC4 rate list shows actual rates (59.8 sps for
-   the nominal 60). Does it depend on the conversion mode?
-7. The wait-time formula is a placeholder, and the backend should own it. The write policy is that
-   changes are written immediately, since a channel config is only applied at conversion time.
-   Capture threading uses a worker plus `set_busy`, and could add progress or cancel for long captures.
-8. Config compatibility: should we also import or export the Windows software's `.cfg` files?
-   Those files have no channel concept.
+The open questions of rev 2 are answered:
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Excitation (IDAC, VBIAS, burn-out) | **Per channel.** It becomes part of the channel config and is applied together with the MUX before each conversion of that channel. |
+| 2 | Thresholds (LTHRESH/UTHRESH) | **In the channel config**, and so in the config file. |
+| 3 | `n_samples` in multi-channel captures | **Per channel.** The backend reports each channel's effective rate. |
+| 4 | Convert All Enabled / multi-channel captures | **Sequencer microcode.** The Sequence tab shows the generated microcode. |
+| 5 | Disabling a channel that a measurement tab has selected | **Warn first.** |
+| 6 | Data rate shown | **The rate for the current conversion mode** (single-cycle / continuous / duty-cycle, datasheet Tables 9a–9d). |
+| 7 | Confirming board writes | **Per-session "don't ask again"** option on the confirmation dialog. |
+| 8 | Windows `.cfg` import/export | **Not needed.** |
+| — | Register widths, option codes, FIR rates | From `regmap.yaml` and the datasheet tables (Phase 2). |
+| — | Reference voltage | Not a register value; used for conversion only. Stored in the config only, read from a config loaded with File ▸ Load; 2.5 V otherwise (a fresh connect has no config). (2026-10-12 00:34 / 00:44) |

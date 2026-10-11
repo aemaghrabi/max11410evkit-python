@@ -1,6 +1,7 @@
 """MAX11410 register map and device layer."""
 
 from max11410_evkit.device.max11410 import (
+    CHANNEL_REGISTERS,
     EVKIT_DEFAULT_CHANNEL,
     MAX11410,
     PART_ID,
@@ -8,6 +9,7 @@ from max11410_evkit.device.max11410 import (
     ChannelConfig,
     DeviceError,
     Reading,
+    channel_from_registers,
     data_rate,
     lsb_volts,
     raw_to_volts,
@@ -25,6 +27,7 @@ from max11410_evkit.device.regmap import (
 )
 
 __all__ = [
+    "CHANNEL_REGISTERS",
     "EVKIT_DEFAULT_CHANNEL",
     "MAX11410",
     "PART_ID",
@@ -37,6 +40,7 @@ __all__ = [
     "Register",
     "RegisterMap",
     "RegisterMapSpec",
+    "channel_from_registers",
     "data_rate",
     "diff_snapshots",
     "format_dump",

@@ -134,6 +134,11 @@ def _palette(c: ThemeColors) -> QPalette:
     p.setColor(QPalette.Shadow, col("#000000"))
     for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
         p.setColor(QPalette.Disabled, role, col(c.muted))
+    # Disabled (e.g. not-yet-wired) controls: flat field backgrounds, no accent highlight.
+    for role in (QPalette.Base, QPalette.Button, QPalette.AlternateBase):
+        p.setColor(QPalette.Disabled, role, col(c.window))
+    p.setColor(QPalette.Disabled, QPalette.Highlight, col(_tint(c.muted, c.window, 0.35)))
+    p.setColor(QPalette.Disabled, QPalette.HighlightedText, col(c.text))
     return p
 
 
@@ -202,6 +207,24 @@ def _stylesheet(c: ThemeColors) -> str:
         padding: 1px 6px; font-size: 10px; font-weight: 700; }}
     QFrame#readoutFrame {{ background: {c.base}; border: 1px solid {c.border};
         border-radius: 8px; }}
+
+    /* Disabled state (Phase 5: tabs that are not wired yet are disabled). */
+    QGroupBox:disabled {{ background: {c.window}; }}
+    QGroupBox::title:disabled {{ color: {c.muted}; }}
+    QLabel:disabled, QCheckBox:disabled, QRadioButton:disabled,
+    QLabel[role="readout"]:disabled {{ color: {c.muted}; }}
+    QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled,
+    QLineEdit[role="hexout"]:disabled {{ color: {c.muted}; background: {c.window}; }}
+    QPushButton:disabled {{ color: {c.muted}; }}
+    QPushButton[primary="true"]:disabled {{
+        background: {c.button}; color: {c.muted}; border: 1px solid {c.border};
+    }}
+    QPushButton[chip="true"]:disabled {{ color: {c.muted}; }}
+    QTableView:disabled {{ color: {c.muted};
+        selection-background-color: {_tint(c.muted, c.window, 0.35)}; }}
+    QFrame#readoutFrame:disabled {{ background: {c.window}; }}
+    QLabel[role="badge"]:disabled {{ color: {c.accent_text}; }}
+    QLabel[role="badge-global"]:disabled {{ color: {c.text}; }}
     """
 
 
