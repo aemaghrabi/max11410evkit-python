@@ -567,3 +567,31 @@ def diff_snapshots(
     """Registers whose value differs: [(name, old or None, new or None)], in key order."""
     names = list(dict.fromkeys([*old, *new]))
     return [(n, old.get(n), new.get(n)) for n in names if old.get(n) != new.get(n)]
+
+
+# -- sequencer entries ------------------------------------------------------------
+UC_FIRST = 0x3A  # µC0
+UC_LAST = 0x6E  # µC52
+UC_ADDR = 0x6F  # µCADDR
+
+
+def is_sequencer_entry(addr: int) -> bool:
+    """True for the µC0-µC52 registers (0x3A-0x6E)."""
+    return UC_FIRST <= addr <= UC_LAST
+
+
+def sequencer_entry_problem(value: int, spec: RegisterMapSpec | None = None) -> str | None:
+    """Why the MAX11410 would store 0x0000 instead of this µC entry, or None if it accepts it.
+
+    Datasheet, "Sequencer Notes": an entry is REG_ADDR[14:8] + REG_DATA[7:0]. An entry whose
+    REG_ADDR is a register with a 24-bit operand (0x11-0x39: PART_ID, SYSC_SEL, the calibration
+    and threshold registers, DATA0-7, STATUS, STATUS_IE) or a µC address (0x3A-0x6F) is stored
+    as 0x0000 (= PD). Bit 15 is not checked.
+    """
+    target = (value >> 8) & 0x7F
+    if UC_FIRST <= target <= UC_ADDR:
+        return f"targets the sequencer address 0x{target:02X}"
+    spec = spec or load_regmap()
+    if target in spec and spec[target].width == 3:
+        return f"targets {spec[target].name} (0x{target:02X}), a 24-bit register"
+    return None

@@ -22,8 +22,10 @@ device/regmap.yaml; SPI first byte bit 7 = R/WB (1 = read); a "read" without the
 write of the dummy 0x00 bytes (as on the real part). CONV_START: DEST[6:4] selects DATA0-7,
 CONV_TYPE[1:0] 0 = single, 1-3 = continuous/duty-cycled; writing it clears CONV_RDY. Start
 commands wake the part (PD -> 0); PD = RESET restores POR values and leaves standby.
-CAL_START sets CAL_RDY. Reading STATUS clears every flag except DATA_RDY, which clears when the
-unread DATA registers are read. INTB = STATUS & STATUS_IE (reset: CONV_RDY only).
+CAL_START sets CAL_RDY. A µC0-µC52 entry that targets a 24-bit register or a µC
+address is stored as 0x0000, as on the chip (datasheet "Sequencer Notes"). Reading STATUS
+clears every flag except DATA_RDY, which clears when the unread DATA registers are read.
+INTB = STATUS & STATUS_IE (reset: CONV_RDY only).
 Sample = 0x800000 + (AINP << 16) + index (AINP 11-15 = unconnected count as 0), unless
 ``adc.inputs`` gives a voltage for AINP: then the code follows MUX_CTRL0, CTRL (REF_SEL, U_BN,
 FORMAT: offset binary / two's complement), PGA (analog gain, or digital gain <= 4x on the
@@ -58,6 +60,12 @@ def reg_width(reg: int) -> int:
 
     spec = load_regmap()
     return spec[reg].width if reg in spec else 1
+
+
+def _sequencer_entry_rejected(reg: int, value: int) -> bool:
+    from max11410_evkit.device.regmap import is_sequencer_entry, sequencer_entry_problem
+
+    return is_sequencer_entry(reg) and sequencer_entry_problem(value) is not None
 
 
 class FakeAdc:
@@ -162,7 +170,10 @@ class FakeAdc:
         w = reg_width(reg)
         if reg in self._readonly or not data:
             return
-        self.regs[reg] = int.from_bytes(data[:w].ljust(w, b"\x00"), "big")
+        value = int.from_bytes(data[:w].ljust(w, b"\x00"), "big")
+        if _sequencer_entry_rejected(reg, value):
+            value = 0  # the chip stores 0x0000 (PD) for an entry it does not support
+        self.regs[reg] = value
         if reg in (REG_CONV_START, REG_CAL_START, REG_SEQ_START, REG_WAIT_START):
             self.regs[REG_PD] = 0  # an asynchronous start command wakes the part
         if reg == REG_PD and self.regs[reg] & 0x03 == 3:  # RESET: POR state, then standby

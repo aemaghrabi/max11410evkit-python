@@ -14,12 +14,19 @@
     max11410-evkit capture -n 50000 -o cap.csv   # any length: split into SRAM-sized blocks
     max11410-evkit hist -n 4096         # code histogram + noise / resolution figures
     max11410-evkit fft -n 8192 --window bh4      # spectrum metrics (one gap-free block)
+    max11410-evkit save-config my.json  # registers (incl. sequencer) + 8 channel configs
+    max11410-evkit save-config my.json --ch 1 --ainp 0 --ainn 1 --gain 128  # set slot 1
+    max11410-evkit load-config my.json  # write registers (PD last), read back and verify
+    max11410-evkit diff-config my.json  # registers where the board differs from the file
+    max11410-evkit capture --config my.json --ch 1   # channel 1 from the file
     max11410-evkit --fake info          # same, against the emulated board
 
 peek/poke take hexadecimal addresses and values (with or without 0x). get/set take
 register names (or 0xNN) and, for set, an enum name or a number (0x.. for hex).
 read/capture/hist/fft take the channel options (--ainp, --rate, --gain, ...); note that the
 signal-path option after the command (--path pga) is not the HID --path before it.
+With --config FILE they start from that file's channel; explicit options override it.
+Calibration registers are saved, but load-config/diff-config use them only with --with-cal.
 Ctrl-C during a capture cancels it after the current block and discards all its data.
 """
 
@@ -162,9 +169,8 @@ def cmd_set(board: EvKitBoard, ref: str, value: str) -> int:
 _CHANNEL_KEYS = ("ainp", "ainn", "refsel", "vref_volts", "rate", "linef", "gain")
 
 
-def _setup_channel(dev, args: argparse.Namespace):
-    """Apply the channel options to slot ``args.ch`` and print a one-line description."""
-    cfg = dev.channels[args.ch]
+def _channel_from_args(cfg, args: argparse.Namespace):
+    """``cfg`` with the channel options from the command line applied (and enabled)."""
     overrides = {k: getattr(args, k) for k in _CHANNEL_KEYS if getattr(args, k) is not None}
     if args.sig_path is not None:
         overrides["path"] = args.sig_path
@@ -172,14 +178,31 @@ def _setup_channel(dev, args: argparse.Namespace):
         overrides["bipolar"] = True
     if overrides.get("gain", 1) != 1 and "path" not in overrides:
         overrides["path"] = "pga"
-    cfg = replace(cfg, enabled=True, **overrides).validate()
-    dev.set_channel(args.ch, cfg)
-    print(
-        f"ch{args.ch}: AINP={cfg.ainp} AINN={cfg.ainn} REFSEL={cfg.refsel} Vref={cfg.vref_volts} V "
+    return replace(cfg, enabled=True, **overrides).validate()
+
+
+def _describe_channel(ch: int, cfg) -> str:
+    return (
+        f"ch{ch}: AINP={cfg.ainp} AINN={cfg.ainn} REFSEL={cfg.refsel} Vref={cfg.vref_volts} V "
         f"{'bipolar' if cfg.bipolar else 'unipolar'} {cfg.path} x{cfg.gain} "
         f"{cfg.linef} rate[{cfg.rate}]={cfg.data_rate():g} sps continuous / "
         f"{cfg.data_rate(mode='single'):g} sps single-cycle"
     )
+
+
+def _setup_channel(dev, args: argparse.Namespace):
+    """Apply the channel options to slot ``args.ch`` and print a one-line description.
+
+    With ``--config FILE`` all 8 slots are first taken from the file (registers untouched).
+    """
+    if getattr(args, "config", None):
+        from max11410_evkit.config import DeviceConfig
+
+        for i, ch in enumerate(DeviceConfig.load(args.config, dev.regs.spec).channels):
+            dev.set_channel(i, ch)
+    cfg = _channel_from_args(dev.channels[args.ch], args)
+    dev.set_channel(args.ch, cfg)
+    print(_describe_channel(args.ch, cfg))
     return cfg
 
 
@@ -358,8 +381,86 @@ def cmd_selfcal(board: EvKitBoard, pga: bool, fast: bool) -> int:
     return 0
 
 
-def _channel_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--ch", type=int, default=0, help="channel slot 0..7 (default 0)")
+# ---------------------------------------------------------------- P4: config files
+def cmd_save_config(board: EvKitBoard, args: argparse.Namespace) -> int:
+    """Registers from the board; channels from the existing file (if any), then --ch N."""
+    from pathlib import Path
+
+    from max11410_evkit.config import DeviceConfig, read_config
+
+    dev = _device(board)
+    dev.identify()
+    path = Path(args.file)
+    if path.exists():
+        old = DeviceConfig.load(path, dev.regs.spec)  # refuses to overwrite a non-config file
+        for i, ch in enumerate(old.channels):
+            dev.set_channel(i, ch)
+        print(f"{path}: kept the 8 channel configs of the existing file")
+    if args.ch is not None:
+        cfg = _channel_from_args(dev.channels[args.ch], args)
+        dev.set_channel(args.ch, cfg)
+        print(_describe_channel(args.ch, cfg))
+    cfg = read_config(dev)
+    cfg.save(path, dev.regs.spec)
+    enabled = [str(i) for i, c in enumerate(cfg.channels) if c.enabled]
+    print(
+        f"saved {len(cfg.registers)} registers and 8 channels "
+        f"(enabled: {', '.join(enabled) or 'none'}) to {path}"
+    )
+    return 0
+
+
+def cmd_load_config(board: EvKitBoard, args: argparse.Namespace) -> int:
+    from max11410_evkit.config import DeviceConfig, apply_config
+
+    dev = _device(board)
+    dev.identify()
+    cfg = DeviceConfig.load(args.file, dev.regs.spec)
+    res = apply_config(dev, cfg, with_cal=args.with_cal, verify=not args.no_verify)
+    print(f"wrote {len(res.written)} registers from {args.file} (PD last)")
+    if res.skipped_cal:
+        print(f"skipped {len(res.skipped_cal)} calibration registers (use --with-cal)")
+    if not res.verified:
+        print("readback not verified (--no-verify)")
+        return 0
+    if not res.mismatches:
+        print("readback: all registers match")
+        return 0
+    print(f"readback: {len(res.mismatches)} register(s) differ:")
+    for name, want, got in res.mismatches:
+        reg = dev.regs.spec[name]
+        print(f"  {name:<14} wrote {reg.fmt(want)}  read {reg.fmt(got)}")
+    return 1
+
+
+def cmd_diff_config(board: EvKitBoard, args: argparse.Namespace) -> int:
+    from max11410_evkit.config import DeviceConfig, diff_config
+
+    dev = _device(board)
+    dev.identify()
+    cfg = DeviceConfig.load(args.file, dev.regs.spec)
+    diffs = diff_config(dev, cfg, with_cal=args.with_cal)
+    scope = "incl." if args.with_cal else "excl."
+    if not diffs:
+        print(f"board matches {args.file} ({scope} calibration registers)")
+        return 0
+    print(f"{len(diffs)} register(s) differ ({scope} calibration registers):")
+    print(f"  {'register':<14} {'file':>10} {'board':>10}")
+    for name, want, got in diffs:
+        reg = dev.regs.spec[name]
+        print(f"  {name:<14} {reg.fmt(want):>10} {reg.fmt(got):>10}")
+    return 1
+
+
+def _channel_args(p: argparse.ArgumentParser, *, ch_default: int | None = 0) -> None:
+    p.add_argument(
+        "--ch",
+        type=int,
+        choices=range(8),
+        default=ch_default,
+        metavar="N",
+        help="channel slot 0..7" + (" (default 0)" if ch_default == 0 else ""),
+    )
     p.add_argument("--ainp", type=int)
     p.add_argument("--ainn", type=int, help="10 = GND")
     p.add_argument("--refsel", type=int, help="0..6 (1 = REF1, the EVKIT 2.5 V reference)")
@@ -370,6 +471,10 @@ def _channel_args(p: argparse.ArgumentParser) -> None:
     # dest differs from the global HID --path (a shared dest would overwrite it)
     p.add_argument("--path", dest="sig_path", choices=["buffered", "bypass", "pga"])
     p.add_argument("--bipolar", action="store_true")
+
+
+def _config_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--config", metavar="FILE", help="take the channels from a config file")
 
 
 def _capture_args(p: argparse.ArgumentParser, *, default_n: int) -> None:
@@ -408,12 +513,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("value")
     p = sub.add_parser("read", help="single conversions on a channel")
     _channel_args(p)
+    _config_arg(p)
     p.add_argument("-n", type=int, default=1, help="number of conversions")
     p.add_argument("--method", choices=["auto", "board", "poll"], default="auto")
     p = sub.add_parser(
         "capture", aliases=["stats"], help="block capture of any length + statistics"
     )
     _channel_args(p)
+    _config_arg(p)
     _capture_args(p, default_n=1000)
     p.add_argument(
         "--block", type=int, help="samples per board block (default: as many as the SRAM holds)"
@@ -421,12 +528,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", help="save the samples as CSV")
     p = sub.add_parser("hist", help="capture + code histogram")
     _channel_args(p)
+    _config_arg(p)
     _capture_args(p, default_n=4096)
     p.add_argument("--block", type=int, help="samples per board block")
     p.add_argument("--bins", type=int, default=4096, help="maximum number of bins (default 4096)")
     p.add_argument("-o", "--output", help="save the histogram as CSV")
     p = sub.add_parser("fft", help="gap-free capture + FFT dynamic performance")
     _channel_args(p)
+    _config_arg(p)
     _capture_args(p, default_n=1024)
     p.add_argument(
         "--window",
@@ -437,6 +546,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("selfcal", help="run the self + PGA calibration sequence")
     p.add_argument("--no-pga", action="store_true", help="offset/self calibration only")
     p.add_argument("--fast", action="store_true", help="calibrate at FILTER.RATE 0xF (driver)")
+    p = sub.add_parser("save-config", help="save registers + channel configs to a JSON file")
+    p.add_argument("file")
+    _channel_args(p, ch_default=None)
+    p = sub.add_parser("load-config", help="write a JSON config to the board and verify")
+    p.add_argument("file")
+    p.add_argument("--with-cal", action="store_true", help="also restore calibration registers")
+    p.add_argument("--no-verify", action="store_true", help="skip the readback check")
+    p = sub.add_parser("diff-config", help="compare a JSON config with the board")
+    p.add_argument("file")
+    p.add_argument("--with-cal", action="store_true", help="also compare calibration registers")
     return ap
 
 
@@ -473,9 +592,15 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_fft(board, args)
             if args.cmd == "selfcal":
                 return cmd_selfcal(board, not args.no_pga, args.fast)
+            if args.cmd == "save-config":
+                return cmd_save_config(board, args)
+            if args.cmd == "load-config":
+                return cmd_load_config(board, args)
+            if args.cmd == "diff-config":
+                return cmd_diff_config(board, args)
         finally:
             board.close()
-    except (EvKitError, ValueError, KeyError, PermissionError) as exc:
+    except (EvKitError, ValueError, KeyError, PermissionError, OSError) as exc:
         msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
         print(f"error: {msg}", file=sys.stderr)
         return 2
