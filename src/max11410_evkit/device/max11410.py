@@ -420,6 +420,50 @@ class MAX11410:
         )
         return Reading(index, raw, raw_to_volts(raw, cfg))
 
+    def capture_block_timeout(self, cfg: ChannelConfig, n: int, *, continuous: bool) -> float:
+        """Expected duration (s) of an ``n``-sample 0x42 block at ``cfg``'s data rate."""
+        mode: RateMode = "continuous" if continuous else "single"
+        period = 1.0 / cfg.data_rate(mode=mode)
+        expected = n * period
+        if continuous and cfg.linef == "SINC4":
+            expected += SINC4_CONTINUOUS_SETTLING_PERIODS * period
+        return expected
+
+    def capture_codes(
+        self,
+        channel: int = 0,
+        n: int = 1000,
+        *,
+        continuous: bool = True,
+        apply: bool = True,
+        progress: Callable[[int, int], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> list[int]:
+        """One 0x42 block of ``n`` raw codes from ``channel`` (must fit the board SRAM).
+
+        ``apply=False`` skips re-applying the channel configuration (used by
+        :func:`max11410_evkit.acquisition.acquire` for the second and later blocks).
+        Continuous conversions are always stopped afterwards, also on error or cancel.
+        ``progress(done_bytes, total_bytes)`` and ``cancel`` are passed to the board.
+        """
+        index, cfg = self._cfg(channel)
+        if apply:
+            self.apply_channel(index)
+        try:
+            data = self.board.capture(
+                n,
+                reg=self.regs.spec[f"DATA{index}"].addr,
+                conv=self.conv_start_value(index, CONV_CONTINUOUS if continuous else CONV_SINGLE),
+                restart_each=not continuous,
+                timeout=self.capture_block_timeout(cfg, n, continuous=continuous),
+                progress=progress,
+                cancel=cancel,
+            )
+        finally:
+            if continuous:
+                self.stop_continuous()
+        return samples_from_bytes(data)
+
     def capture(
         self,
         channel: int = 0,
@@ -428,24 +472,13 @@ class MAX11410:
         continuous: bool = True,
         progress: Callable[[int, int], None] | None = None,
     ) -> list[Reading]:
-        """Block capture of ``n`` samples into board SRAM, then read back and convert."""
+        """Block capture of ``n`` samples into board SRAM, then read back and convert.
+
+        One block only; for captures of any length use :func:`max11410_evkit.acquisition.acquire`.
+        """
         index, cfg = self._cfg(channel)
-        self.apply_channel(index)
-        mode: RateMode = "continuous" if continuous else "single"
-        expected = n / cfg.data_rate(mode=mode)
-        if continuous and cfg.linef == "SINC4":
-            expected += SINC4_CONTINUOUS_SETTLING_PERIODS / cfg.data_rate(mode=mode)
-        data = self.board.capture(
-            n,
-            reg=self.regs.spec[f"DATA{index}"].addr,
-            conv=self.conv_start_value(index, CONV_CONTINUOUS if continuous else CONV_SINGLE),
-            restart_each=not continuous,
-            timeout=expected,
-            progress=progress,
-        )
-        if continuous:
-            self.stop_continuous()
-        return [Reading(index, raw, raw_to_volts(raw, cfg)) for raw in samples_from_bytes(data)]
+        codes = self.capture_codes(index, n, continuous=continuous, progress=progress)
+        return [Reading(index, raw, raw_to_volts(raw, cfg)) for raw in codes]
 
     # ------------------------------------------------------------------ calibration
     def _calibration_timeout(self) -> float:

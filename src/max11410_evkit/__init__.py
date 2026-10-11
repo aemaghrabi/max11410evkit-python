@@ -3,10 +3,15 @@
 Layers:
     transport/  raw 64-byte HID reports (HidTransport on hidapi, FakeEvKitTransport for tests/demo)
     board/      the EVKIT firmware command protocol (EvKitBoard)
+    device/     MAX11410 register map, channels, conversions, calibration
+    acquisition block captures of any length (split into board-SRAM-sized blocks)
+    analysis/   statistics, code histogram, FFT dynamic performance
+    export      CSV files for captures, histograms and spectra
 """
 
 from max11410_evkit.board.evkit import EvKitBoard, FirmwareVersion, connect
 from max11410_evkit.transport.errors import (
+    Cancelled,
     CommandFailed,
     EvKitError,
     NotConnected,
@@ -17,6 +22,7 @@ from max11410_evkit.transport.errors import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "Cancelled",
     "CommandFailed",
     "EvKitBoard",
     "EvKitError",

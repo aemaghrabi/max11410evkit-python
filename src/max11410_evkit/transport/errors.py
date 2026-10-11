@@ -19,6 +19,10 @@ class ProtocolError(EvKitError):
     """A reply was malformed or did not match what the command should return."""
 
 
+class Cancelled(EvKitError):
+    """An acquisition was cancelled by the caller (between blocks or SRAM read chunks)."""
+
+
 class CommandFailed(EvKitError):
     """The firmware answered with a status byte other than 0xEE (normally 0xFA)."""
 

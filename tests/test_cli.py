@@ -93,3 +93,74 @@ def test_selfcal_fast_fake(capsys):
     assert main(["--fake", "selfcal", "--fast", "--no-pga"]) == 0
     out = capsys.readouterr().out
     assert "rate[15] (fast" in out and "self-calibration done" in out
+
+
+def test_capture_fake_with_csv(capsys, tmp_path):
+    out_file = tmp_path / "c.csv"
+    assert main(["--fake", "capture", "-n", "300", "--block", "100", "-o", str(out_file)]) == 0
+    out = capsys.readouterr().out
+    assert "captured 300 samples in 3 blocks" in out
+    assert "effective res." in out and "noise-free res." in out
+    assert out_file.exists()
+
+
+def test_stats_alias(capsys):
+    assert main(["--fake", "stats", "-n", "50"]) == 0
+    assert "samples        : 50" in capsys.readouterr().out
+
+
+def test_hist_fake_prints_bars(capsys):
+    assert main(["--fake", "hist", "-n", "20"]) == 0
+    out = capsys.readouterr().out
+    assert "histogram      : 20 bins" in out and "#" in out
+
+
+def test_fft_fake(capsys, tmp_path):
+    assert (
+        main(["--fake", "fft", "-n", "256", "--window", "hann", "-o", str(tmp_path / "f.csv")]) == 0
+    )
+    out = capsys.readouterr().out
+    assert "window         : hann, 256 points" in out and "ENOB" in out
+
+
+@pytest.mark.parametrize("n", ["100", "16384", "8"])
+def test_fft_length_must_be_power_of_two_in_one_block(capsys, n):
+    assert main(["--fake", "fft", "-n", n]) == 2
+    assert "power of 2" in capsys.readouterr().err
+
+
+def test_signal_path_option_does_not_replace_hid_path():
+    from max11410_evkit.cli import build_parser
+
+    args = build_parser().parse_args(["read", "--path", "pga", "--gain", "8"])
+    assert args.path is None and args.sig_path == "pga"
+    args = build_parser().parse_args(["--path", "DevSrvsID:1", "capture", "--path", "bypass"])
+    assert args.path == "DevSrvsID:1" and args.sig_path == "bypass"
+
+
+def test_capture_cancelled_before_start_reports_zero_blocks(capsys, monkeypatch):
+    import max11410_evkit.acquisition as acq
+
+    real = acq.acquire
+
+    def cancelled_acquire(*args, cancel, **kw):
+        cancel.set()  # as if Ctrl-C arrived before the first block
+        return real(*args, cancel=cancel, **kw)
+
+    monkeypatch.setattr(acq, "acquire", cancelled_acquire)
+    assert main(["--fake", "capture", "-n", "50"]) == 1
+    assert "captured 0 samples in 0 blocks" in capsys.readouterr().out
+
+
+def test_fft_warns_without_test_tone(capsys, monkeypatch):
+    from max11410_evkit.transport import fake as fake_mod
+
+    orig = fake_mod.FakeEvKitTransport.__init__
+
+    def init(self, *a, **kw):
+        orig(self, *a, **kw)
+        self.adc.inputs[2] = 1.0  # constant DC input
+
+    monkeypatch.setattr(fake_mod.FakeEvKitTransport, "__init__", init)
+    assert main(["--fake", "fft", "-n", "256"]) == 0
+    assert "warning: no test tone" in capsys.readouterr().out

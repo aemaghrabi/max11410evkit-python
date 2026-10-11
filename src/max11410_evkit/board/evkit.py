@@ -29,6 +29,7 @@ from typing import NamedTuple
 
 from max11410_evkit.transport.base import REPORT_SIZE, Transport
 from max11410_evkit.transport.errors import (
+    Cancelled,
     CommandFailed,
     NotConnected,
     ProtocolError,
@@ -413,6 +414,7 @@ class EvKitBoard:
         restart_each: bool = False,
         readback: bool = True,
         progress: Callable[[int, int], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
     ) -> bytes:
         """0x42 block capture into board SRAM, then (by default) read it back with 0x43.
 
@@ -430,6 +432,10 @@ class EvKitBoard:
 
         Note: in continuous mode the ADC keeps converting afterwards; stop it yourself
         (e.g. write CONV_START) if needed.
+
+        ``cancel`` is polled before the capture and between SRAM read chunks (the firmware
+        cannot be interrupted during the 0x42 itself); when it returns True, :class:`Cancelled`
+        is raised and the block is discarded.
 
         Returns the raw bytes (``n_samples * width``), or ``b""`` if ``readback`` is False.
         """
@@ -459,15 +465,26 @@ class EvKitBoard:
             ]
         )
         with self._lock:
+            if cancel is not None and cancel():
+                raise Cancelled("capture cancelled before it started")
             self._command(Cmd.CAPTURE, args, timeout=host_timeout)
             if not readback:
                 return b""
-            return self.sram_read(0, total, progress=progress)
+            return self.sram_read(0, total, progress=progress, cancel=cancel)
 
     def sram_read(
-        self, address: int, n: int, *, progress: Callable[[int, int], None] | None = None
+        self,
+        address: int,
+        n: int,
+        *,
+        progress: Callable[[int, int], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
     ) -> bytes:
-        """0x43: read ``n`` bytes of board SRAM starting at ``address`` (63-byte chunks)."""
+        """0x43: read ``n`` bytes of board SRAM starting at ``address`` (63-byte chunks).
+
+        ``cancel`` is polled before each chunk; when it returns True, :class:`Cancelled` is
+        raised (nothing on the board needs undoing: SRAM reads have no side effects).
+        """
         if n <= 0:
             return b""
         if address < 0 or address + n > self.sram_bytes or address + n > 0x10000:
@@ -475,6 +492,8 @@ class EvKitBoard:
         out = bytearray()
         with self._lock:
             while len(out) < n:
+                if cancel is not None and cancel():
+                    raise Cancelled(f"SRAM read cancelled after {len(out)} of {n} B")
                 a = address + len(out)
                 k = min(MAX_SRAM_CHUNK, n - len(out))  # never 0: the firmware would not reply
                 chunk = self.raw_transact(bytes([Cmd.SRAM_READ, a >> 8, a & 0xFF, k]))

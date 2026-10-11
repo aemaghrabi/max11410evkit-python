@@ -10,6 +10,9 @@ src/max11410_evkit/
   board/       EVKIT firmware command protocol: EvKitBoard (typed method per command)
   device/      MAX11410: regmap.yaml + RegisterMap (named registers/fields, shadow cache),
                MAX11410 (init, channels, conversions, self-calibration, volts)
+  acquisition.py  acquire(): captures of any length, split into board-SRAM-sized blocks
+  analysis/    statistics (effective / noise-free resolution), code histogram, FFT metrics
+  export.py    CSV files for captures, histograms and spectra ("Save Graph")
   cli.py       max11410-evkit smoke-test CLI
   gui/         desktop app (PySide6 + pyqtgraph)
 ```
@@ -106,6 +109,50 @@ with connect() as board:
 
 Conversions use offset binary (FORMAT = 1): bipolar `V = (raw − 2^23)·2·Vref/(2^24·G)`,
 unipolar `V = raw·Vref/(2^24·G)`.
+
+## Captures and analysis (Phase 3)
+
+```sh
+max11410-evkit capture -n 1000                 # statistics (alias: stats)
+max11410-evkit capture -n 50000 -o cap.csv     # any length; saved as CSV
+max11410-evkit capture -n 2000 --single        # single-cycle conversions
+max11410-evkit hist -n 4096 -o hist.csv        # code histogram
+max11410-evkit fft -n 8192 --window bh4 -o fft.csv   # SNR, THD, SINAD, SFDR, ENOB
+```
+
+All four accept the same channel options as `read` (`--ch --ainp --ainn --refsel --vref --rate
+--linef --gain --path --bipolar`). Ctrl-C cancels after the current block and discards all
+the data of that capture.
+
+* **Blocks and gaps.** The firmware captures into the board SRAM (32 KB assumed, so at most
+  10,922 samples per block). Longer captures are split into blocks automatically. The ADC is
+  idle while a block is read back over USB, so there is a time gap before every new block (the
+  `block` column of the CSV). An FFT therefore always uses one gap-free block: a power of 2, at
+  most 8,192 samples.
+* **Definitions.** FSR = 2·VREF/gain bipolar, VREF/gain unipolar. Effective resolution =
+  log2(FSR/rms noise). Noise-free resolution is shown twice: log2(FSR/(6.6·rms)) as in the
+  datasheet, and log2(FSR/measured p-p). FFT: 0 dBFS = sine of peak FSR/2, THD over harmonics
+  2–6, ENOB = (SINAD − 1.76)/6.02, default window Blackman-Harris 4-term. Hann and rectangular
+  leak too much for a tone that is not exactly on an FFT bin; use them only for coherent tones.
+
+```python
+import threading
+from max11410_evkit import connect
+from max11410_evkit.acquisition import acquire
+from max11410_evkit.device import MAX11410
+from max11410_evkit.export import save_capture_csv
+
+with connect() as board:
+    adc = MAX11410(board)
+    adc.init()
+    stop = threading.Event()  # stop.set() from another thread cancels
+    cap = acquire(adc, channel=0, n=20000, cancel=stop, progress=lambda d, t: None)
+    st = cap.stats()
+    print(st.average, st.effective_resolution, st.noise_free_resolution)
+    save_capture_csv("cap.csv", cap, stats=st)
+    fft = acquire(adc, 0, 8192, gap_free=True).spectrum("blackman-harris-4")
+    print(fft.metrics.snr_db, fft.metrics.enob)
+```
 
 ## Library use (board level)
 
